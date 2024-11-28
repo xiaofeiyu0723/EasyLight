@@ -1,2 +1,2 @@
 # EasyLight
-A light controller in HKUST(GZ)
+A light controller
