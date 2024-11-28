@@ -1,142 +1,208 @@
+/*
+  A Kinetic energy switch Signal Receiver
+  Use the CC1101 module
+  Retrieve the 'switch_ID' and 'button_ID' from the signal
+
+  Author:  Xiaofei YU, Lan HUANG 
+  Date:    Nov 2024
+*/
+
 #include <Arduino.h>
 #include <RadioLib.h>
 #include <AceCRC.h>
 
-// Select the type of CRC algorithm we'll be using
-using namespace ace_crc::crc16ccitt_byte;
+/*
+  CC1101 Connection
+    SPI pins:
+    - CSn  -> CS or H-CS    = GPIO15
+    - SCK  -> SCK/CLK/H-SCK = GPIO14
+    - MISO -> MISO/H-MISO   = GPIO12
+    - MOSI -> MOSI/H-MOSI   = GPIO13
+    IO(interupt) pins:
+    - GDO0 -> D1            = GPIO5
+    - GDO2 -> D2            = GPIO4 (When using Transmit mode)
 
-#define PACKET_LENGTH 8 // bytes
-#define MIN_RSSI -100 // dBm
+  Switch Packet Structure
+    Preamble(X） like  01010101...0000100001 = 0X55, 0x55, ... 0x55, 0x54 (TODO: TBD)
+    Sync Word(3) like  0x21, 0xA4, (0x23)
+    Payload(5)   like  0x12, 0x34, 0x56, 0x78,  0x12
+    CRC(2)       like  0x34, 0x56
+*/
+
+// #======================== Definitions ========================#
+
+// Pinout
+#define PIN_CS 15
+#define PIN_GDO0 5
+#define PIN_RST RADIOLIB_NC
+#define PIN_GDO2 RADIOLIB_NC // Should be set to RADIOLIB_NC for RX only
+
+// Serial
+#define SERIAL_BAUD 9600
+
+// Radio
+#define RADIO_CARRIER_FREQUENCY 433.3   // MHz
+#define RADIO_BIT_RATE 250.0            // kbps
+#define RADIO_FREQUENCY_DEVIATION 125.0 // kHz
+#define RADIO_RX_BANDWIDTH 270.0        // kHz
+#define RADIO_OUTPUT_POWER 10           // dBm
+#define RADIO_PREAMBLE_LENGTH 32        // bits
+
+// Packet
+#define PACKET_RSSI_THRESHOLD -100 // dBm (RSSI threshold for packet reception)
+#define PACKET_LENGTH 8            // The Bytes you want to receive (after the sync word)
+uint8_t SYNC_WORD[] = {0x21, 0xA4};
+uint8_t SYNC_WORD_LENGTH = 2;
+#define PACKET_THIRD_SYNC_WORD 0x23       // or Payload Prefix (TODO: Implement the third sync word)
+using namespace ace_crc::crc16ccitt_byte; // Select the type of CRC algorithm we'll be using
+
+// Special
+volatile bool receivedFlag = false; // flag to indicate that a packet was received
+#if defined(ESP8266) || defined(ESP32)
+ICACHE_RAM_ATTR // Place the function below in the RAM region
+#endif
+
+    void
+    setFlag(void) // void and no arguments
+{
+  receivedFlag = true; // we got a packet, set the flag
+}
+
+// #======================== Variations ========================#
+
+CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
+
+// #======================== Prototypes ========================#
 
 void bytesToHexString(byte array[], unsigned int len, char buffer[]);
 
-// CC1101 has the following connections:
-// CS pin:    15
-// GDO0 pin:  5
-// RST pin:   unused
-// GDO2 pin:  unused
-// CC1101 radio = new Module(10, 2, RADIOLIB_NC, RADIOLIB_NC);
-CC1101 radio = new Module(15, 5, RADIOLIB_NC, RADIOLIB_NC);
+// #======================== Initialization ========================#
 
-void setup() {
-  Serial.begin(9600);
+void setup()
+{
+  Serial.begin(SERIAL_BAUD);
 
-  // initialize CC1101 with default settings
   Serial.print(F("[CC1101] Initializing ... "));
-  // int state = radio.begin();
-
-  int state = radio.begin(433.3, 250.0, 125.0, 270.0, 10, 32);
-
+  int state = radio.begin(RADIO_CARRIER_FREQUENCY, RADIO_BIT_RATE, RADIO_FREQUENCY_DEVIATION, RADIO_RX_BANDWIDTH, RADIO_OUTPUT_POWER, RADIO_PREAMBLE_LENGTH);
   radio.setCrcFiltering(false);
   radio.fixedPacketLengthMode(PACKET_LENGTH);
-  // CC1101不支持3bytes的sync word 0x
-  uint8_t syncWord[] = { 0x21, 0xA4};
-  radio.setSyncWord(syncWord, 2);
-
-  if (state == RADIOLIB_ERR_NONE) {
+  radio.setSyncWord(SYNC_WORD, SYNC_WORD_LENGTH);
+  // Check Init
+  if (state == RADIOLIB_ERR_NONE)
+  {
     Serial.println(F("success!"));
-  } else {
+  }
+  else
+  {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true) { delay(10); }
+    while (true)
+    {
+      delay(10);
+    }
   }
 
-  // set the function that will be called
-  // when new packet is received
-  radio.setPacketReceivedAction(setFlag);
+  radio.setPacketReceivedAction(setFlag); // Callback on packet received
 
-  // start listening for packets
   Serial.print(F("[CC1101] Starting to listen ... "));
   state = radio.startReceive();
-  if (state == RADIOLIB_ERR_NONE) {
+  // Check Start
+  if (state == RADIOLIB_ERR_NONE)
+  {
     Serial.println(F("success!"));
-  } else {
+  }
+  else
+  {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true) { delay(10); }
+    while (true)
+    {
+      delay(10);
+    }
   }
-
-  // if needed, 'listen' mode can be disabled by calling
-  // any of the following methods:
-  //
-  // radio.standby()
-  // radio.sleep()
-  // radio.transmit();
-  // radio.receive();
-  // radio.readData();
 }
 
-// flag to indicate that a packet was received
-volatile bool receivedFlag = false;
+// # ======================== Main Loop ========================#
 
-// this function is called when a complete packet
-// is received by the module
-// IMPORTANT: this function MUST be 'void' type
-//            and MUST NOT have any arguments!
-#if defined(ESP8266) || defined(ESP32)
-ICACHE_RAM_ATTR
-#endif
-void setFlag(void) {
-  // we got a packet, set the flag
-  receivedFlag = true;
-}
-
-void loop() {
-  // check if the flag is set
-  if (receivedFlag) {
-    // reset flag
+void loop()
+{
+  if (receivedFlag)
+  {
     receivedFlag = false;
 
-    // you can read received data as an Arduino String
-    // String str;
-    // int state = radio.readData(str);
+    /*
+    String str;
+    int state = radio.readData(str);
+    */
 
-    // you can also read received data as byte array
-    byte byteArr[PACKET_LENGTH];
+    byte byteArr[PACKET_LENGTH]; // 0x23, [0x12, 0x34, 0x56, 0x78], [0x12], [0x34, 0x56]
     int state = radio.readData(byteArr, PACKET_LENGTH);
 
-    if (state == RADIOLIB_ERR_NONE) {
-      // if (radio.getRSSI() > MIN_RSSI) {
-      // Verify CRC and only continue if valid
-      byte messageArr[] = {byteArr[1], byteArr[2], byteArr[3],byteArr[4],byteArr[5]};
-      unsigned long messageCRC = (byteArr[6] << 8) | byteArr[7];
-      crc_t crc = crc_init();
-      crc = crc_update(crc, messageArr, 5);
-      crc = crc_finalize(crc);
-      if (((unsigned long) crc) == messageCRC) {
-        char switchIDStr[9]; 
-        char buttonIDStr[3];
-        bytesToHexString(&byteArr[1], 4, switchIDStr);
-        bytesToHexString(&byteArr[5], 1, buttonIDStr);
+    /*
+    // Print Content
+    Serial.print(F("Received packet: "));
+    for (uint8_t i = 0; i < PACKET_LENGTH; i++)
+    {
+      Serial.print(byteArr[i], HEX);
+      Serial.print(F(" "));
+    }
+    Serial.println();
+    */
 
-        Serial.print("SwitchID: ");
-        Serial.print(switchIDStr);
-        Serial.print("\tButtonID: ");
-        Serial.print(buttonIDStr);
-        Serial.print("\tRSSI: ");
-        Serial.print(radio.getRSSI());
-        Serial.print(" dBm\tLQI: ");
-        Serial.println(radio.getLQI());
-      }
-      // }
-    } else{
-      // some other error occurred
+    if (state == RADIOLIB_ERR_NONE)
+    {
+      // if (radio.getRSSI() > PACKET_RSSI_THRESHOLD) {
+      if (byteArr[0] == PACKET_THIRD_SYNC_WORD)
+      {
+
+        // Verify CRC and only continue if valid
+        byte payload[] = {byteArr[1], byteArr[2], byteArr[3], byteArr[4], byteArr[5]}; // SwitchID + ButtonID
+
+        crc_t crc = crc_init();
+        crc = crc_update(crc, payload, 5);
+        crc = crc_finalize(crc);
+        uint16 messageCRC = (byteArr[6] << 8) | byteArr[7];
+
+        if ((uint16)crc == messageCRC)
+        {
+          char switchIDStr[9];
+          char buttonIDStr[3];
+          bytesToHexString(&byteArr[1], 4, switchIDStr);
+          bytesToHexString(&byteArr[5], 1, buttonIDStr);
+
+          Serial.print("SwitchID: ");
+          Serial.print(switchIDStr);
+          Serial.print("\tButtonID: ");
+          Serial.print(buttonIDStr);
+          Serial.print("\tRSSI: ");
+          Serial.print(radio.getRSSI());
+          Serial.print(" dBm\tLQI: ");
+          Serial.println(radio.getLQI());
+        } // CRC check
+      } // Third Sync Word check
+      //} // RSSI check
+    }
+    else
+    {
       Serial.print(F("failed, code "));
       Serial.println(state);
     }
 
-    // put module back to listen mode
-    radio.startReceive();
+    radio.startReceive(); // put module back to listen mode
   }
 }
 
+// #======================== Functions ========================#
+
 // Convert array of bytes into a string containing the HEX representation of the array
-void bytesToHexString(byte array[], unsigned int len, char buffer[]) {
-    for (unsigned int i = 0; i < len; i++) {
-        byte nib1 = (array[i] >> 4) & 0x0F;
-        byte nib2 = (array[i] >> 0) & 0x0F;
-        buffer[i*2+0] = nib1  < 0xA ? '0' + nib1  : 'A' + nib1  - 0xA;
-        buffer[i*2+1] = nib2  < 0xA ? '0' + nib2  : 'A' + nib2  - 0xA;
-    }
-    buffer[len*2] = '\0';
+void bytesToHexString(byte array[], unsigned int len, char buffer[])
+{
+  for (unsigned int i = 0; i < len; i++)
+  {
+    byte nib1 = (array[i] >> 4) & 0x0F;
+    byte nib2 = (array[i] >> 0) & 0x0F;
+    buffer[i * 2 + 0] = nib1 < 0xA ? '0' + nib1 : 'A' + nib1 - 0xA;
+    buffer[i * 2 + 1] = nib2 < 0xA ? '0' + nib2 : 'A' + nib2 - 0xA;
+  }
+  buffer[len * 2] = '\0';
 }
