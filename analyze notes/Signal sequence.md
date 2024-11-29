@@ -126,11 +126,12 @@ Status:       00000001
   - fixed 0x55, ..., 0x55, 0x54
 - Sync Word (24 bits?)
   - fixed 0x21, 0x24, 0x23
-- Data (15/17 bytes)
+- Data (14/16 bytes)
   - type 0x03 
     - controller=0x01
     - gateway=0x03
   - length 0x00
+  - TBD 0x00 0x00 0x00
   - operation type 0x01
     - on/off: 11100111 = 0xE7
     - add/delete: 01100000 = 0x60

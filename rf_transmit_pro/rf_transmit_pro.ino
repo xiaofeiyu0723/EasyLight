@@ -1,121 +1,208 @@
+/*
+  A Kinetic energy switch Signal Transmitter (Basic)
+  Use the CC1101 module
+  Imitate the signal of a kinetic energy switch (Just toggle the light)
+
+  Author:  Xiaofei YU, Lan HUANG
+  Date:    Nov 2024
+*/
+
+#include <Arduino.h>
 #include <RadioLib.h>
 #include <AceCRC.h>
-// #define PACKET_LENGTH 8 // bytes
 
-// Select the type of CRC algorithm we'll be using
-using namespace ace_crc::crc16ccitt_byte;
+/*
+  CC1101 Connection
+    SPI pins:
+    - CSn  -> CS or H-CS    = GPIO15
+    - SCK  -> SCK/CLK/H-SCK = GPIO14
+    - MISO -> MISO/H-MISO   = GPIO12
+    - MOSI -> MOSI/H-MOSI   = GPIO13
+    IO(interupt) pins:
+    - GDO0 -> D1            = GPIO5
+    - GDO2 -> D2            = GPIO4
 
+  Gateway Packet Structure
 
-void setFlag(void);
-// CC1101 has the following connections:
-// CS pin:    15
-// GDO0 pin:  5
-// RST pin:   unused
-// GDO2 pin:  4
+    ADD(14 Bytes):
+      Preamble(X）  like  01010101...0000100001 = 0X55, 0x55, ... 0x55, 0x54 (TODO: TBD)
+      Sync Word(3)  like  0x21, 0xA4, (0x23)
+      -------------------------------------
+      DeviceType(1) like  0x03
+      Length(1)     like  0x0E
+      TBD(3)        like  0x3A, 0x96, 0x9D
+      *Operation(1)  like  0x60
+      *CRC(2)        like  0x42, 0xBE
+      TBD(2)        like  0x9B, 0x00
+      Controller(3) like 0x36, 0xF9, 0x8D
+      Command(1)    like 0x01
+      -------------------------------------
+      The Segment with * is not included in the CRC calculation
+
+    ON(16 Bytes):
+      Preamble(X）  like  01010101...0000100001 = 0X55, 0x55, ... 0x55, 0x54 (TODO: TBD)
+      Sync Word(3)  like  0x21, 0xA4, (0x23)
+      -------------------------------------
+      DeviceType(1) like  0x03
+      Length(1)     like  0x10
+      TBD(3)        like  0x3A, 0x96, 0x9D
+      *Operation(1)  like  0xE7
+      *CRC(2)        like  0x97, 0xCE
+      TBD(2)        like  0x9B, 0x00
+      Controller(3) like 0x36, 0xF9, 0x8D
+      Command(1)    like 0x04
+      Parameter(2)  like 0x02
+      Value(1)      like 0x01
+      -------------------------------------
+      The Segment with * is not included in the CRC calculation
+
+*/
+
+// #======================== Definitions ========================#
+
+// Pinout
+#define PIN_CS 15
+#define PIN_GDO0 5
+#define PIN_RST RADIOLIB_NC
+#define PIN_GDO2 4
+
+// Serial
+#define SERIAL_BAUD 9600
+
+// Radio
+#define RADIO_CARRIER_FREQUENCY 433.3   // MHz
+#define RADIO_BIT_RATE 250.0            // kbps
+#define RADIO_FREQUENCY_DEVIATION 125.0 // kHz
+#define RADIO_RX_BANDWIDTH 270.0        // kHz
+#define RADIO_OUTPUT_POWER 10           // dBm
+#define RADIO_PREAMBLE_LENGTH 32        // bits
+
+// Packet
+using namespace ace_crc::crc16ccitt_byte; // Select the type of CRC algorithm we'll be using
+
+// Special
+volatile bool transmittedFlag = true; // flag to indicate that a packet was sent
+#if defined(ESP8266) || defined(ESP32)
+ICACHE_RAM_ATTR
+#endif
+void setFlag(void)
+{
+  transmittedFlag = true; // we sent a packet, set the flag
+}
+
+// #======================== Variables ========================#
+
 CC1101 radio = new Module(15, 5, RADIOLIB_NC, 4);
 
-// or using RadioShield
-// https://github.com/jgromes/RadioShield
-//CC1101 radio = RadioShield.ModuleA;
+// #======================== Prototypes ========================#
 
-// save transmission state between loops
-int transmissionState = RADIOLIB_ERR_NONE;
+// #======================== Initialization ========================#
 
-void setup() {
-  Serial.begin(9600);
+void setup()
+{
+  Serial.begin(SERIAL_BAUD);
 
-  // initialize CC1101 with default settings
   Serial.print(F("[CC1101] Initializing ... "));
-  int state =  radio.begin(433.3, 250.0, 125.0, 270.0, 10, 32);
-  radio.setCrcFiltering(false);
-  // radio.fixedPacketLengthMode(PACKET_LENGTH);
-  // radio.disableAddressFiltering();
-
-  // CC1101不支持3bytes的sync word
-  // uint8_t syncWord[] = {0x21, 0xA4};
-  // radio.setSyncWord(syncWord, 2);
-  uint8_t syncWord[] = {0x00};
-  radio.setSyncWord(syncWord, 0);
-
-
-  if (state == RADIOLIB_ERR_NONE) {
+  int state = radio.begin(RADIO_CARRIER_FREQUENCY, RADIO_BIT_RATE, RADIO_FREQUENCY_DEVIATION, RADIO_RX_BANDWIDTH, RADIO_OUTPUT_POWER, RADIO_PREAMBLE_LENGTH);
+  // Check Init
+  if (state == RADIOLIB_ERR_NONE)
+  {
     Serial.println(F("success!"));
-  } else {
+  }
+  else
+  {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true) { delay(10); }
+    while (true)
+    {
+      delay(10);
+    }
   }
 
-  // set the function that will be called
-  // when packet transmission is finished
-  radio.setPacketSentAction(setFlag);
-
+  radio.setPacketSentAction(setFlag); // Callback on packet sent
 }
 
-// flag to indicate that a packet was sent
-volatile bool transmittedFlag = true;
+// #======================== Main Loop ========================#
 
-// this function is called when a complete packet
-// is transmitted by the module
-// IMPORTANT: this function MUST be 'void' type
-//            and MUST NOT have any arguments!
-#if defined(ESP8266) || defined(ESP32)
-  ICACHE_RAM_ATTR
-#endif
-void setFlag(void) {
-  // we sent a packet, set the flag
-  transmittedFlag = true;
-}
+void loop()
+{
+  if (transmittedFlag)
+  {
+    radio.finishTransmit();  // Clear Transmitor
+    transmittedFlag = false; // flag to indicate that a packet is being sent
 
-// counter to keep track of transmitted packets
-int count = 0;
-byte buttonID=0x0F;
+    // =#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#
 
-void loop() {
-  // check if the previous transmission finished
-  if(transmittedFlag) {
-    // reset flag
-    transmittedFlag = false;
-    if (transmissionState == RADIOLIB_ERR_NONE) {
-      // packet was successfully sent
-      Serial.println(F("transmission finished!"));
-
-      // NOTE: when using interrupt-driven transmit method,
-      //       it is not possible to automatically measure
-      //       transmission data rate using getDataRate()
-
-    } else {
-      Serial.print(F("failed, code "));
-      Serial.println(transmissionState);
+    byte controllerID[3] = {0x36, 0xF9, 0x8D};
+    Serial.print(F("[CC1101] Sending packet ... "));
+    Serial.print(F("controllerID = 0x"));
+    for (int i = 0; i < 3; i++)
+    {
+      Serial.print(controllerID[i], HEX);
     }
 
-    // clean up after transmission is finished
-    // this will ensure transmitter is disabled,
-    // RF switch is powered down etc.
-    radio.finishTransmit();
+    // A Minimal Packet
+    byte byteArr[] = {0x54, 0x21, 0xA4, 0x23, 0x03, 0x10, 0x3A, 0x96, 0x9D, 0xE7, 0x00, 0x00, 0x9B, 0x00, controllerID[0], controllerID[1], controllerID[2], 0x04, 0x02, 0x01};
 
-    // wait a second before transmitting again
+    // place the CRC at the middle of the packet
+    byte payload[] = {byteArr[4], byteArr[5], byteArr[6], byteArr[7], byteArr[8], byteArr[12], byteArr[13], byteArr[14], byteArr[15], byteArr[16], byteArr[17], byteArr[18], byteArr[19]};
+    crc_t crc = crc_init();
+    crc = crc_update(crc, payload, 13);
+    crc = crc_finalize(crc);
+    byteArr[10] = (byte)(crc >> 8);
+    byteArr[11] = (byte)(crc & 0xFF);
+
+    // =#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#
+
+    // send the packet
+    int state = radio.startTransmit(byteArr, 20);
+
+    if (state == RADIOLIB_ERR_NONE)
+    {
+      Serial.println(F("transmission finished!"));
+    }
+    else
+    {
+      Serial.print(F("failed, code "));
+      Serial.println(state);
+    }
+
     delay(3000);
-
-    // send another one
-    Serial.print(F("[CC1101] Sending another packet ... "));
-    Serial.print(F("buttonID = 0x"));
-    Serial.println(buttonID, HEX);  // 以十六进制格式打印buttonID
-
-    // you can also transmit byte array up to 256 bytes long
-    // 添加
-    // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,    0x03,0x0E,   0x3A,0x96,0x9D,    0x60,    0x8D,0x53,    0x9B,0x00,   0x36,0xAF,0x6C,   0x01}; 
-    // 移除
-    // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,    0x03,0x0E,   0x3A,0x96,0x9D,    0x60,    0xBD,0x30,    0x9B,0x00,   0x36,0xAF,0x6C,   0x02}; 
-    // int state = radio.startTransmit(byteArr, 23);
-    // 开
-    // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,  0x03,0x10,   0x3A,0x96,0x9D,    0xE7,    0xBD,0x27,    0x9B,0x00,   0x36,0xAF,0x6C,   0x04,0x02,   0x01}; 
-    // 关
-    // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,  0x03,0x10,   0x3A,0x96,0x9D,    0xE7,    0xAD,0x06,    0x9B,0x00,   0x36,0xAF,0x6C,   0x04,0x02,   0x00}; 
-    // int state = radio.startTransmit(byteArr, 25);
-
-    // ping
-    // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,    0x03,0x0F,   0x3A,0x96,0x9D,    0x2A,    0x07,0xA8,    0x9B,0x00,   0x36,0xAF,0x6C,   0x05,0x00}; 
-    // int state = radio.startTransmit(byteArr, 24);
   }
 }
+
+/*
+  Test Packet
+
+  // ################################################
+
+  // ADD
+  byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,    0x03,0x0E,   0x3A,0x96,0x9D,    0x60,    0x42,0xBE,    0x9B,0x00,   0x36,0xF9,0x8D,   0x01};
+  // Meaning                                                         Getw,Len     TBD fixed          op       CRC           TBD fixed    Controller ID     Cmd
+  // Segment used for calculating CRC                                _________    ______________                            —————————    ——————————————    —————
+  // 03 0E 3A 96 9D 9B 00 36 F9 8D 01
+  int state = radio.startTransmit(byteArr, 23);
+
+  // DEL
+  byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,    0x03,0x0E,   0x3A,0x96,0x9D,    0x60,    0xBD,0x30,    0x9B,0x00,   0x36,0xAF,0x6C,   0x02};
+  // 03 0E 3A 96 9D 9B 00 36 Af 6C 02
+  int state = radio.startTransmit(byteArr, 23);
+
+
+  // ################################################
+
+  // ON
+  byte byteArr2[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,  0x03,0x10,   0x3A,0x96,0x9D,    0xE7,    0x97,0xCE,    0x9B,0x00,   0x36,0xF9,0x8D,   0x04,0x02,   0x01};
+  // 03 10 3A 96 9D 9B 00 36 F9 8D 04 02 01
+  int state2 = radio.startTransmit(byteArr2, 25);
+
+  // OFF
+  // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,  0x03,0x10,   0x3A,0x96,0x9D,    0xE7,    0xAD,0x06,    0x9B,0x00,   0x36,0xAF,0x6C,   0x04,0x02,   0x00};
+
+  // ################################################
+
+  // ping
+  // byte byteArr[] = {0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,    0x03,0x0F,   0x3A,0x96,0x9D,    0x2A,    0x07,0xA8,    0x9B,0x00,   0x36,0xAF,0x6C,   0x05,0x00};
+  // int state = radio.startTransmit(byteArr, 24);
+
+*/
