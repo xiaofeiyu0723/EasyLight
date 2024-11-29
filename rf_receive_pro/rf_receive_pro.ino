@@ -51,7 +51,7 @@
 // Packet
 #define PACKET_RSSI_THRESHOLD -100 // dBm (RSSI threshold for packet reception)
 #define PACKET_LENGTH 8            // The Bytes you want to receive (after the sync word)
-uint8_t SYNC_WORD[] = {0x21, 0xA4};
+uint8_t SYNC_WORD[] = {0x21, 0xA4}; // The [21 A4] would be better, [A4 23] is not working, I don't know why
 uint8_t SYNC_WORD_LENGTH = 2;
 #define PACKET_THIRD_SYNC_WORD 0x23       // or Payload Prefix (TODO: Implement the third sync word)
 using namespace ace_crc::crc16ccitt_byte; // Select the type of CRC algorithm we'll be using
@@ -61,14 +61,12 @@ volatile bool receivedFlag = false; // flag to indicate that a packet was receiv
 #if defined(ESP8266) || defined(ESP32)
 ICACHE_RAM_ATTR // Place the function below in the RAM region
 #endif
-
-    void
-    setFlag(void) // void and no arguments
+void setFlag(void) // void and no arguments
 {
   receivedFlag = true; // we got a packet, set the flag
 }
 
-// #======================== Variations ========================#
+// #======================== Variables ========================#
 
 CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
 
@@ -126,9 +124,9 @@ void setup()
 
 void loop()
 {
-  if (receivedFlag)
+  if (receivedFlag) //if a packet was received, process it
   {
-    receivedFlag = false;
+    receivedFlag = false; // flag to indicate that a packet is being received
 
     /*
     String str;
