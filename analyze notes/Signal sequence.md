@@ -364,3 +364,27 @@ Specifically manifested as an [error code] of 2
 //                              == ↑↑
 ```
 !! In unbinding, no matter what the OPERATION is, the controller will always respond with UNAUTHORIZED (0x02), otherwiase, the controller will only respond when the operation is effective
+
+### A Potential Segment
+For example, in ADD
+
+```
+//23 03 0E 3A 96 9D 60 00 00 9B 00 36 F9 D8 01 (ADD 14 bytes)
+//         __ __ __          ↑↑    __ __ __ ++
+```
+
+The 9B seems like a FACTORY CODE?
+
+Even if a command is identical **except for this part**
+
+It will be considered unauthorized by the controller
+
+I have try to change the 9B to 9C
+
+When Use Gateway, everything is OK
+
+But when I try to use this 9C to bind a switch to the gateway
+
+It can bind successfully (the LED on the controller will flash and then turn off)
+
+But the switch can not control the light
