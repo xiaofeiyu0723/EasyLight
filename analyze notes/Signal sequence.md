@@ -358,7 +358,9 @@ the controller will respond with the operation
 If there is no binding between the controller and the gateway, the controller will reject the command (no matter what the command is)
 
 Specifically manifested as an [error code] of 2
+
+```
 //23 04 0B 00 36 F9 B8 37 01 8D 02 02
 //                              == ↑↑
-
+```
 !! In unbinding, no matter what the OPERATION is, the controller will always respond with UNAUTHORIZED (0x02), otherwiase, the controller will only respond when the operation is effective
