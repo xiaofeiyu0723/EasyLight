@@ -291,56 +291,21 @@ Resp Structure:
 
 The ?? Between RR and AA seems not used
 
--------------------------------------------------
+$$$$$$$$$$$$$$$$$$$$$$ BIND SWITCH TO GATEWAY(08) $$$$$$$$$$$$$$$$$$$$$$
 
-Bind Switch to Gateway
-
-1010101010101010101010101010101010101010000100001 10100100 00100011
-00000011 00001111 
-00111010 10010110 10011101 
-00101010 01100001 11010101 
-10011011 00000000 
-00110110 10101111 01101100
-00001000 00000001
-
+Gateway SENT PACKET:
 //23 03 0F 3A 96 9D 2A 61 D5 9B 00 36 AF 6C 08 01
 //         __ __ __                __ __ __ ++ ++
 
+08 01 BIND
+08 02 UNBIND
 
+Controller Response:
+//23 04 0B 00 36 F9 B8 F8 88 8D 08 00
+//                     [   ]    ==
 -------------------------------------------------
 
-Clear
 
-100111111111111010101010101010101010101010101010101010000100001 10100100 00100011
-00000011 00001111                     // 03 0F
-00111010 10010110 10011101            // 3A 96 9D
-00101010 01010001 10110110            // 2A 51 B6
-10011011 00000000                     // 9B 00       
-00110110 10101111 01101100            // 36 AF 6C
-00001000 00000010                     // 08 02
-
-//23 03 0F 3A 96 9D 2A 51 B6 9B 00 36 AF 6C 08 02
-
-
-Message Type:
-- 01: Controller response to the switch
-- 04: Controller response to the gateway
-- 03: Gateway send to the controller
-
-Command:
-- 01: ADD
-- 02: DELETE
-- 03: CLEAR ALL SWITCHES and GATEWAYS
-- 04: ON/OFF
-- 05: STATUS
-- 08: BIND SWITCH TO GATEWAY
-
-If this gateway is not in the controller, the controller will reject the command, including unknown message type
-- 06: *Have response but not sure what it is
-- 07: *Have response but not sure what it is
-
-Know Switch ID:
-//23 01 0C 00 36 C8 E4 76 DB 44 01 00 41
 
 ```
 
@@ -362,3 +327,38 @@ Know Switch ID:
 8. Bind/Unbind switch to gateway
    - ID: 0x08
    - Parameter: 0x01 (bind), 0x02 (unbind)
+
+
+
+### Possible Message Type
+
+Message Type:
+- 01: Controller response to the switch
+- 04: Controller response to the gateway
+- 03: Gateway send to the controller
+
+Command:
+- 01: ADD
+- 02: DELETE
+- 03: CLEAR ALL SWITCHES and GATEWAYS
+- 04: ON/OFF
+- 05: STATUS
+- 08: BIND/UNBIND SWITCH TO GATEWAY
+
+### Response
+There are two conditions for the controller to respond to the gateway
+1. When the operation is effective (belongs to the above command)
+2. There is a binding between the controller and the gateway
+
+the controller will respond with the operation
+- If the operation is not effective, the controller will not respond
+
+
+### Authentication 
+If there is no binding between the controller and the gateway, the controller will reject the command (no matter what the command is)
+
+Specifically manifested as an [error code] of 2
+//23 04 0B 00 36 F9 B8 37 01 8D 02 02
+//                              == ↑↑
+
+!! In unbinding, no matter what the OPERATION is, the controller will always respond with UNAUTHORIZED (0x02), otherwiase, the controller will only respond when the operation is effective

@@ -141,8 +141,12 @@ void loop()
       Serial.print(controllerID[i], HEX);
     }
 
-    // A Minimal Packet
-    byte byteArr[] = {0x54, 0x21, 0xA4, 0x23, 0x03, 0x10, 0x3A, 0x96, 0x9D, 0xE7, 0x00, 0x00, 0x9B, 0x00, controllerID[0], controllerID[1], controllerID[2], 0x04, 0x02, 0x01};
+    // =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+= ON/OFF (3 params) =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    
+    /*
+
+    // A Minimal Packet (OPEN=E7)
+    byte byteArr[] = {0x54, 0x21, 0xA4, 0x23, 0x03, 0x10, 0x3A, 0x96, 0x9D, 0xE7, 0x00, 0x00, 0x9C, 0x00, controllerID[0], controllerID[1], controllerID[2], 0x04, 0x02, 0x01};
 
     // place the CRC at the middle of the packet
     byte payload[] = {byteArr[4], byteArr[5], byteArr[6], byteArr[7], byteArr[8], byteArr[12], byteArr[13], byteArr[14], byteArr[15], byteArr[16], byteArr[17], byteArr[18], byteArr[19]};
@@ -152,10 +156,52 @@ void loop()
     byteArr[10] = (byte)(crc >> 8);
     byteArr[11] = (byte)(crc & 0xFF);
 
-    // =#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#
-
     // send the packet
     int state = radio.startTransmit(byteArr, 20);
+
+    */
+
+    // =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+= ADD/DEL (1 param) =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+
+    /*
+
+    // A Minimal Packet (ADD=60)
+    byte byteArr[] = {0x54, 0x21, 0xA4, 0x23, 0x03, 0x0E, 0x3A, 0x96, 0x9D, 0x60, 0x00, 0x00, 0x9B, 0x00, controllerID[0], controllerID[1], controllerID[2], 0x01};
+
+    // place the CRC at the middle of the packet
+    byte payload[] = {byteArr[4], byteArr[5], byteArr[6], byteArr[7], byteArr[8], byteArr[12], byteArr[13], byteArr[14], byteArr[15], byteArr[16], byteArr[17]};
+    crc_t crc = crc_init();
+    crc = crc_update(crc, payload, 11);
+    crc = crc_finalize(crc);
+    byteArr[10] = (byte)(crc >> 8);
+    byteArr[11] = (byte)(crc & 0xFF);
+
+    // send the packet
+    int state = radio.startTransmit(byteArr, 18);
+
+    */
+
+    // =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+= PING (2 params) =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+
+    
+
+    // A Minimal Packet (PING=2A)
+    byte byteArr[] = {0x54, 0x21, 0xA4, 0x23, 0x03, 0x0F, 0x3A, 0x96, 0x9D, 0x2A, 0x00, 0x00, 0x9B, 0x00, controllerID[0], controllerID[1], controllerID[2], 0x05, 0x00};
+
+    // place the CRC at the middle of the packet
+    byte payload[] = {byteArr[4], byteArr[5], byteArr[6], byteArr[7], byteArr[8], byteArr[12], byteArr[13], byteArr[14], byteArr[15], byteArr[16], byteArr[17], byteArr[18]};
+    crc_t crc = crc_init();
+    crc = crc_update(crc, payload, 12);
+    crc = crc_finalize(crc);
+    byteArr[10] = (byte)(crc >> 8);
+    byteArr[11] = (byte)(crc & 0xFF);
+
+    // send the packet
+    int state = radio.startTransmit(byteArr, 19);
+
+    
+
+    // =#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#
 
     if (state == RADIOLIB_ERR_NONE)
     {
@@ -167,7 +213,7 @@ void loop()
       Serial.println(state);
     }
 
-    delay(3000);
+    delay(10000);
   }
 }
 
