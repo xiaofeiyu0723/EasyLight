@@ -161,6 +161,8 @@ Try different error code rates in preamble and sync word
 // D4 = 1101 0100 NO
 
 -------------------------------------------------
+Different Count of Keys
+-------------------------------------------------
 One Key Switch
 // Press  00000100 = 4
 
@@ -174,15 +176,17 @@ Two Keys Switch
 // Right  00000010 = 2
 
 -------------------------------------------------
+Kinetic Switch Signal and Controller Response
+-------------------------------------------------
 
-The Packet sent from the controller
-when receiving a signal from the [kinetic switch]
+$$$$$$$$$$$$$$$$$$$$$$ Press $$$$$$$$$$$$$$$$$$$$$$
 
-SENT PACKET: 23 AA BB CC DD 04 00 00 (PRESS 7 bytes)
-//              __ __ __ __ ++ [   ]
-//           **                ** ** (CRC from 5 bytes)
+Kinetic Switch SENT PACKET:
+//23 AA BB CC DD 04 00 00 (PRESS 7 bytes)
+//   __ __ __ __ ++ [   ]
+//**                ** ** (CRC from 5 bytes)
 
-RECEIVED PACKETs:
+Controller Response:
 //23 01 0C 00 36 F9 C6 A3 86 D8 01 01 41 (RES_ON 12 bytes)
 //23 01 0C 00 36 F9 C6 90 B7 D8 01 00 41 (RES_OFF 12 bytes)
 //            __ __    [   ] __    ==
@@ -202,41 +206,77 @@ Other switch example
 //            __ __    [   ] __    ==
 
 Resp Structure:
-//   CC LL LL AA AA ?? RR RR AA MM VV ??
+//   CC LL ?? AA AA ?? RR RR AA MM VV ??
 - CC: Message Type?
-- LL: Length (16 bits)
-- AA: Address (24 bits)
+- LL: Length
+- AA: Controller ID (24 bits)
 - RR: CRC16-SPI-FUJITSU (16 bits)
-- MM: 
+- MM: Operation Type (8 bits)
 - VV: Value (8 bits)
 
 -------------------------------------------------
+Gateway Signal and Controller Response
+-------------------------------------------------
 
-The Packet sent from the controller
-when receiving a signal from the [gateway] (ON)
+$$$$$$$$$$$$$$$$$$$$$$ ON/OFF(04) $$$$$$$$$$$$$$$$$$$$$$
 
-SENT PACKET: 23 03 10 3A 96 9D E7 00 00 9B 00 36 F9 D8 04 02 01 (ON 16 bytes)
-//                    __ __ __                __ __ __ ++ ++ ++
-//           **                ** ** **                         (CRC from 13 bytes)
+Gateway SENT PACKET:
+//23 03 10 3A 96 9D E7 00 00 9B 00 36 F9 D8 04 02 01 (ON 16 bytes)
+//         __ __ __                __ __ __ ++ ++ ++
+//**                ** ** **                         (CRC from 13 bytes)
+//   CC LL GG GG GG ?? RR RR ?? ?? AA AA AA MM QQ VV
+//                                             00error
+//                                             01ok
+//                                             02ok
+//                                             03error
+//                                             04error
 
-RECEIVED PACKETs:
-//23 04 0B 00 36 F9 B8 BD E5 D8 04 00 (RES 11 bytes)
+Controller Response:
+//23 04 0B 00 36 F9 B8 BD E5 D8 04 00 (RES_ON 11 bytes)
+//23 04 0B 00 36 F9 B8 BD E5 D8 04 00 (RES_ON 11 bytes)
 //                     [   ]    ==
 //**                ** ** **          (CRC from 8 bytes)
 
--------------------------------------------------
+//23 04 0B 00 36 F9 B8 9D A7 8D 04 02 (REJECT 11 bytes)!!!!
 
-The Packet sent from the controller
-when receiving a signal from the [gateway] (PING)
+$$$$$$$$$$$$$$$$$$$$$$ ADD(01)/DELETE(02) $$$$$$$$$$$$$$$$$$$$$$
 
-SENT PACKET: 23 03 0F 3A 96 9D 2A 00 00 9B 00 36 F9 D8 05 00 (PING 15 bytes)
-//                    __ __ __                __ __ __ ++
-//           **                ** ** **                      (CRC from 12 bytes)
-//              CC LL GG GG GG ?? RR RR ?? ?? AA AA AA MM ??
+Gateway SENT PACKET:
+//23 03 0E 3A 96 9D 60 00 00 9B 00 36 F9 D8 01 (ADD 14 bytes)
+//         __ __ __                __ __ __ ++
 
-RECEIVED PACKETs:
+Controller Response:
+//23 04 0B 00 36 F9 B8 42 10 8D 01 00 (RES_SUCCESS     11 bytes) add always success
+//23 04 0B 00 36 F9 B8 17 43 8D 02 00 (RES_DEL_SUCCESS 11 bytes)
+//23 04 0B 00 36 F9 B8 37 01 8D 02 02 (REJECT          11 bytes) !!!!
+because we already delete this gateway in the controller, so the next add will be rejected
+
+$$$$$$$$$$$$$$$$$$$$$$ RESET(03) $$$$$$$$$$$$$$$$$$$$$$
+
+Gateway SENT PACKET:
+//23 03 0E 3A 96 9D 60 00 00 9B 00 36 F9 D8 03 (ADD 14 bytes)
+
+Controller Response:
+//23 04 0B 00 36 F9 B8 24 72 8D 03 00 (RES_SUCCESS 11 bytes)
+//23 04 0B 00 36 F9 B8 04 30 8D 03 02 (REJECT       11 bytes)!!!! 
+because we already clear all switches and gateways in the controller, so the next reset will be rejected
+ 
+$$$$$$$$$$$$$$$$$$$$$$ PING(05) $$$$$$$$$$$$$$$$$$$$$$
+
+Gateway SENT PACKET:
+//23 03 0F 3A 96 9D 2A 00 00 9B 00 36 F9 D8 05 00 (PING 15 bytes)
+//         __ __ __                __ __ __ ++
+//**                ** ** **                      (CRC from 12 bytes)
+//   CC LL GG GG GG ?? RR RR KK ?? AA AA AA MM ??
+
+// GG GG GG can not be changed, otherwise, the controller not response
+// ?? ?? between RR and AA, if changed, the controller will reject
+// KK is kind of Gateway ID
+
+Controller Response:
 //23 04 0D 00 36 F9 91 82 32 D8 05 00 01 41 (RES_ON 13 bytes)
 //23 04 0D 00 36 F9 91 B1 03 D8 05 00 00 41 (RES_OFF 13 bytes)
+//23 04 0D 00 36 F9 91 92 13 8D 05 00 01 40 (RES_ON 13 bytes) !!!! WHY 40 OR 41
                        [   ]    ==    ==
 //**                ** ** **                (CRC from 10 bytes)
 
@@ -249,6 +289,76 @@ Resp Structure:
 - MM: 
 - VV: Value (8 bits)
 
+The ?? Between RR and AA seems not used
 
 -------------------------------------------------
+
+Bind Switch to Gateway
+
+1010101010101010101010101010101010101010000100001 10100100 00100011
+00000011 00001111 
+00111010 10010110 10011101 
+00101010 01100001 11010101 
+10011011 00000000 
+00110110 10101111 01101100
+00001000 00000001
+
+//23 03 0F 3A 96 9D 2A 61 D5 9B 00 36 AF 6C 08 01
+//         __ __ __                __ __ __ ++ ++
+
+
+-------------------------------------------------
+
+Clear
+
+100111111111111010101010101010101010101010101010101010000100001 10100100 00100011
+00000011 00001111                     // 03 0F
+00111010 10010110 10011101            // 3A 96 9D
+00101010 01010001 10110110            // 2A 51 B6
+10011011 00000000                     // 9B 00       
+00110110 10101111 01101100            // 36 AF 6C
+00001000 00000010                     // 08 02
+
+//23 03 0F 3A 96 9D 2A 51 B6 9B 00 36 AF 6C 08 02
+
+
+Message Type:
+- 01: Controller response to the switch
+- 04: Controller response to the gateway
+- 03: Gateway send to the controller
+
+Command:
+- 01: ADD
+- 02: DELETE
+- 03: CLEAR ALL SWITCHES and GATEWAYS
+- 04: ON/OFF
+- 05: STATUS
+- 08: BIND SWITCH TO GATEWAY
+
+If this gateway is not in the controller, the controller will reject the command, including unknown message type
+- 06: *Have response but not sure what it is
+- 07: *Have response but not sure what it is
+
+Know Switch ID:
+//23 01 0C 00 36 C8 E4 76 DB 44 01 00 41
+
 ```
+
+
+### Operations
+1. Add gateway to controller
+   - ID: 0x01
+2. Delete gateway from controller
+   - ID: 0x02
+3. Clear all switches and gateways
+   - ID: 0x03
+4. Turn on/off light
+   - ID: 0x04
+   - Parameter: 0x02 (01 also works, but 00, 03, 04 not)
+   - Status: 0x01 (01 on, 00 off)
+5. Get status of light
+   - ID: 0x05
+   - TBD: 0x00 (no matter what)
+8. Bind/Unbind switch to gateway
+   - ID: 0x08
+   - Parameter: 0x01 (bind), 0x02 (unbind)
