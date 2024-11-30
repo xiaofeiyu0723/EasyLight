@@ -61,7 +61,7 @@ Main Components:
 Signal Sequence:
 ```
 // A packet sent from controller when receiving a signal from a kinetic switch(sometime)
-HEX: 01 0C 00 36 F9 C6 90 B7 8D 01 00 41
+HEX: 01 0C 00 36 F9 C6 90 B7 D8 01 00 41
 
 Premable:       1010.... 01010100
 Sync Word:      00100001 10100100 00100011
@@ -70,7 +70,7 @@ Length:         00001100
 TBD:            00000000
 ControllerID_1: 00110110 11111001 = 0x36F9
 TBD:            11000110 10010000 10110111 (CRC?)
-ControllerID_2: 10001101 = 0x8D
+ControllerID_2: 10001101 = 0xD8
 TBD:            00000001 (parameter?)
 Status:         00000000
 TBD:            01000001 (tail?)
@@ -88,7 +88,7 @@ TBD:            01000001 (tail?)
   - TBD 0X00
   - controller_ID part 1 0x36F9
   - TBD 0XC6 90 B7 (CRC?)
-  - controller_ID part 2 0x8D
+  - controller_ID part 2 0xD8
   - TBD 0x01 (parameter?)
   - status 0x00 (different when on/off)
   - TBD 0x41/0x81 (tail?)
@@ -137,7 +137,7 @@ Status:       00000001
     - add/delete: 01100000 = 0x60
   - CRC16-SPI-FUJITSU 0x00 0x00
   - TBD 0x0000 (gateway_ID?)
-  - controller_ID 0x36 F9 8D
+  - controller_ID 0x36 F9 D8
   - command 0x01
     - on/off: 00000100 = 0x04
     - add: 00000001 = 0x01
@@ -147,3 +147,66 @@ Status:       00000001
   - status/value 0x00 (different when on/off)
     - on: 00000001 = 0x01
     - off: 00000000 = 0x00
+
+
+# Others
+
+```
+Try different error code rates
+// 54 = 0101 0100 YES
+// 14 = 0001 0100 YES
+// 24 = 0011 0100 NO
+// 04 = 0000 0100 NO
+// C4 = 1100 0100 NO
+// D4 = 1101 0100 NO
+
+Three Keys Switch
+// Left   00000001 = 1
+// Middle 00000100 = 4
+// Right  00000010 = 2
+
+Two Keys Switch
+// Left   00000000 = 0
+// Right  00000010 = 2
+
+-------------------------------------------------
+
+The Packet sent from the controller
+when receiving a signal from the [kinetic switch]
+//23 01 0C 00 36 F9 C6 A3 86 D8 01 01 41 ON
+//23 01 0C 00 36 F9 C6 90 B7 D8 01 00 41 OFF
+//ID          36 F9          D8
+
+Other switch example
+//23 01 0C 00 36 E6 27 90 69 08 01 00 41 
+//            36 E           08
+
+//23 01 0C 00 37 40 C1 5A 66 71 01 00 81 
+//23 01 0C 00 37 40 C1 5A 66 71 01 00 81
+//23 01 0C 00 37 40 C1 69 57 71 01 01 81
+//            37 40          71
+
+//23 01 0C 00 37 07 F9 31 43 8B 01 03 41
+//23 01 0C 00 37 07 F9 02 70 8B 01 00 41
+//            37 07          8B
+
+-------------------------------------------------
+
+The Packet sent from the controller
+when receiving a signal from the [gateway] (ON)
+//23 04 0B 00 36 F9 B8 BD E5 D8 04 00
+
+The Packet sent from the controller
+when receiving a signal from the [gateway] (PING)
+//23 04 0D 00 36 F9 91 82 32 D8 05 00 01 41 ON
+//23 04 0D 00 36 F9 91 B1 03 D8 05 00 00 41 OFF
+
+-------------------------------------------------
+
+//23 01 0C 00 37 05 CB 57 69 DF 03 00 C3 15 C2 BE 99 60 7D 18
+
+0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,  0x03,0x10,   0x3A,0x96,0x9D,    0xE7,    0xBD,0x27,    0x9B,0x00,   0x36,0xAF,0x6C,   0x04,0x02,   0x01
+
+-------------------------------------------------
+
+```
