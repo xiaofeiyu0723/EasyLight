@@ -174,15 +174,15 @@ Two Keys Switch
 The Packet sent from the controller
 when receiving a signal from the [kinetic switch]
 
-SENT PACKET: 23 AA BB CC DD 04 00 00 (press)
+SENT PACKET: 23 AA BB CC DD 04 00 00 (PRESS 7 bytes)
 //              __ __ __ __ ++ [   ]
-//           **                ** **         CRC from 5 bytes
+//           **                ** ** (CRC from 5 bytes)
 
 RECEIVED PACKETs:
-//23 01 0C 00 36 F9 C6 A3 86 D8 01 01 41 ON
-//23 01 0C 00 36 F9 C6 90 B7 D8 01 00 41 OFF
+//23 01 0C 00 36 F9 C6 A3 86 D8 01 01 41 (RES_ON 12 bytes)
+//23 01 0C 00 36 F9 C6 90 B7 D8 01 00 41 (RES_OFF 12 bytes)
 //            __ __    [   ] __    ==
-//**                ** ** **                 CRC from 9 bytes
+//**                ** ** **             (CRC from 9 bytes)
 
 Other switch example
 //23 01 0C 00 36 E6 27 90 69 08 01 00 41 
@@ -202,29 +202,29 @@ Other switch example
 The Packet sent from the controller
 when receiving a signal from the [gateway] (ON)
 
-SENT PACKET: 23 03 10 3A 96 9D E7 00 00 9B 00 36 F9 D8 04 02 01
+SENT PACKET: 23 03 10 3A 96 9D E7 00 00 9B 00 36 F9 D8 04 02 01 (ON 16 bytes)
 //                    __ __ __                __ __ __ ++ ++ ++
-//           **                ** ** **                         CRC from 13 bytes
+//           **                ** ** **                         (CRC from 13 bytes)
 
 RECEIVED PACKETs:
-//23 04 0B 00 36 F9 B8 BD E5 D8 04 00
+//23 04 0B 00 36 F9 B8 BD E5 D8 04 00 (RES 11 bytes)
 //                     [   ]    ==
-//**                ** ** **           CRC from 9 bytes
+//**                ** ** **          (CRC from 8 bytes)
 
 -------------------------------------------------
 
 The Packet sent from the controller
 when receiving a signal from the [gateway] (PING)
 
-SENT PACKET: 23 03 0F 3A 96 9D 2A 00 00 9B 00 36 F9 D8 05 00
+SENT PACKET: 23 03 0F 3A 96 9D 2A 00 00 9B 00 36 F9 D8 05 00 (PING 15 bytes)
 //                    __ __ __                __ __ __ ++
-//           **                ** ** **                         CRC from 12 bytes
+//           **                ** ** **                      (CRC from 12 bytes)
 
 RECEIVED PACKETs:
-//23 04 0D 00 36 F9 91 82 32 D8 05 00 01 41 ON
-//23 04 0D 00 36 F9 91 B1 03 D8 05 00 00 41 OFF
+//23 04 0D 00 36 F9 91 82 32 D8 05 00 01 41 (RES_ON 13 bytes)
+//23 04 0D 00 36 F9 91 B1 03 D8 05 00 00 41 (RES_OFF 13 bytes)
                        [   ]    ==    ==
-//**                ** ** **                    CRC from 10 bytes
+//**                ** ** **                (CRC from 10 bytes)
 
 -------------------------------------------------
 ```
