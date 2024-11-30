@@ -152,13 +152,17 @@ Status:       00000001
 # Others Test Notes
 
 ```
-Try different error code rates
+Try different error code rates in preamble and sync word
 // 54 = 0101 0100 YES
 // 14 = 0001 0100 YES
 // 24 = 0011 0100 NO
 // 04 = 0000 0100 NO
 // C4 = 1100 0100 NO
 // D4 = 1101 0100 NO
+
+-------------------------------------------------
+One Key Switch
+// Press  00000100 = 4
 
 Three Keys Switch
 // Left   00000001 = 1
@@ -188,14 +192,23 @@ Other switch example
 //23 01 0C 00 36 E6 27 90 69 08 01 00 41 
 //            __ __    [   ] __    ==
 
-//23 01 0C 00 37 40 C1 5A 66 71 01 00 81 
+//23 01 0C 00 37 40 C1 5A 66 71 01 00 81 (why 81?)
 //23 01 0C 00 37 40 C1 5A 66 71 01 00 81
 //23 01 0C 00 37 40 C1 69 57 71 01 01 81
 //            __ __    [   ] __    ==
 
-//23 01 0C 00 37 07 F9 31 43 8B 01 03 41
+//23 01 0C 00 37 07 F9 31 43 8B 01 03 41 (error)
 //23 01 0C 00 37 07 F9 02 70 8B 01 00 41
 //            __ __    [   ] __    ==
+
+Resp Structure:
+//   CC LL LL AA AA ?? RR RR AA MM VV ??
+- CC: Message Type?
+- LL: Length (16 bits)
+- AA: Address (24 bits)
+- RR: CRC16-SPI-FUJITSU (16 bits)
+- MM: 
+- VV: Value (8 bits)
 
 -------------------------------------------------
 
@@ -219,12 +232,23 @@ when receiving a signal from the [gateway] (PING)
 SENT PACKET: 23 03 0F 3A 96 9D 2A 00 00 9B 00 36 F9 D8 05 00 (PING 15 bytes)
 //                    __ __ __                __ __ __ ++
 //           **                ** ** **                      (CRC from 12 bytes)
+//              CC LL GG GG GG ?? RR RR ?? ?? AA AA AA MM ??
 
 RECEIVED PACKETs:
 //23 04 0D 00 36 F9 91 82 32 D8 05 00 01 41 (RES_ON 13 bytes)
 //23 04 0D 00 36 F9 91 B1 03 D8 05 00 00 41 (RES_OFF 13 bytes)
                        [   ]    ==    ==
 //**                ** ** **                (CRC from 10 bytes)
+
+Resp Structure:
+//   CC LL LL AA AA ?? RR RR AA MM ?? VV ??
+- CC: Message Type?
+- LL: Length (16 bits)
+- AA: Address (24 bits)
+- RR: CRC16-SPI-FUJITSU (16 bits)
+- MM: 
+- VV: Value (8 bits)
+
 
 -------------------------------------------------
 ```
