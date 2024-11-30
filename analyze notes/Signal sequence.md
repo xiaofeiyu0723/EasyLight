@@ -149,7 +149,7 @@ Status:       00000001
     - off: 00000000 = 0x00
 
 
-# Others
+# Others Test Notes
 
 ```
 Try different error code rates
@@ -173,40 +173,58 @@ Two Keys Switch
 
 The Packet sent from the controller
 when receiving a signal from the [kinetic switch]
+
+SENT PACKET: 23 AA BB CC DD 04 00 00 (press)
+//              __ __ __ __ ++ [   ]
+//           **                ** **         CRC from 5 bytes
+
+RECEIVED PACKETs:
 //23 01 0C 00 36 F9 C6 A3 86 D8 01 01 41 ON
 //23 01 0C 00 36 F9 C6 90 B7 D8 01 00 41 OFF
-//ID          36 F9          D8
+//            __ __    [   ] __    ==
+//**                ** ** **                 CRC from 9 bytes
 
 Other switch example
 //23 01 0C 00 36 E6 27 90 69 08 01 00 41 
-//            36 E           08
+//            __ __    [   ] __    ==
 
 //23 01 0C 00 37 40 C1 5A 66 71 01 00 81 
 //23 01 0C 00 37 40 C1 5A 66 71 01 00 81
 //23 01 0C 00 37 40 C1 69 57 71 01 01 81
-//            37 40          71
+//            __ __    [   ] __    ==
 
 //23 01 0C 00 37 07 F9 31 43 8B 01 03 41
 //23 01 0C 00 37 07 F9 02 70 8B 01 00 41
-//            37 07          8B
+//            __ __    [   ] __    ==
 
 -------------------------------------------------
 
 The Packet sent from the controller
 when receiving a signal from the [gateway] (ON)
+
+SENT PACKET: 23 03 10 3A 96 9D E7 00 00 9B 00 36 F9 D8 04 02 01
+//                    __ __ __                __ __ __ ++ ++ ++
+//           **                ** ** **                         CRC from 13 bytes
+
+RECEIVED PACKETs:
 //23 04 0B 00 36 F9 B8 BD E5 D8 04 00
+//                     [   ]    ==
+//**                ** ** **           CRC from 9 bytes
+
+-------------------------------------------------
 
 The Packet sent from the controller
 when receiving a signal from the [gateway] (PING)
+
+SENT PACKET: 23 03 0F 3A 96 9D 2A 00 00 9B 00 36 F9 D8 05 00
+//                    __ __ __                __ __ __ ++
+//           **                ** ** **                         CRC from 12 bytes
+
+RECEIVED PACKETs:
 //23 04 0D 00 36 F9 91 82 32 D8 05 00 01 41 ON
 //23 04 0D 00 36 F9 91 B1 03 D8 05 00 00 41 OFF
+                       [   ]    ==    ==
+//**                ** ** **                    CRC from 10 bytes
 
 -------------------------------------------------
-
-//23 01 0C 00 37 05 CB 57 69 DF 03 00 C3 15 C2 BE 99 60 7D 18
-
-0xFF,0x55,0x55,0x55,0x55,0x54,0x21,0xA4,0x23,  0x03,0x10,   0x3A,0x96,0x9D,    0xE7,    0xBD,0x27,    0x9B,0x00,   0x36,0xAF,0x6C,   0x04,0x02,   0x01
-
--------------------------------------------------
-
 ```
