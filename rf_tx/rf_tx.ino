@@ -28,7 +28,7 @@
       Preamble(X）  like  01010101...0000100001 = 0X55, 0x55, ... 0x55, 0x54 (TODO: TBD)
       Sync Word(3)  like  0x21, 0xA4, (0x23)
       -------------------------------------
-      DeviceType(1) like  0x03
+      MsgType(1)    like  0x03
       Length(1)     like  0x0E
       TBD(3)        like  0x3A, 0x96, 0x9D
       *Operation(1)  like  0x60
@@ -43,7 +43,7 @@
       Preamble(X）  like  01010101...0000100001 = 0X55, 0x55, ... 0x55, 0x54 (TODO: TBD)
       Sync Word(3)  like  0x21, 0xA4, (0x23)
       -------------------------------------
-      DeviceType(1) like  0x03
+      MsgType(1)    like  0x03
       Length(1)     like  0x10
       TBD(3)        like  0x3A, 0x96, 0x9D
       *Operation(1)  like  0xE7
@@ -60,13 +60,22 @@
 
 // #======================== Definitions ========================#
 
-// Pinout
+// Pinout ========================
+/* 
+  @@@ Caution @@@ 
+    Please check the pinout of your board，otherwise it may lead to the flash destroyed !!!
+    If it happens, you force to flash the bootloader to the board.
+    (Press and hold the BOOT button, then POWER ON again to enter burning mode)
+    Then, in the Arduino IDE, select the correct board and port, and burn the bootloader.
+*/
+
 
 // For ESP8266
 #define PIN_CS 15
 #define PIN_GDO0 5
 #define PIN_RST RADIOLIB_NC
 #define PIN_GDO2 4
+
 
 /*
 // For ESP32
@@ -84,7 +93,7 @@
 #define PIN_GDO2 2
 */
 
-// Pinout end
+// Pinout end ========================
 
 // Serial
 #define SERIAL_BAUD 9600
@@ -117,16 +126,17 @@ CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
 struct LightPacket {
     byte preamble[2];
     byte syncWord[3];
-    byte deviceType;
+
+    byte msgType;
     byte length;
     byte fixedTBD_0[3];
-    byte operation;
-    byte crc[2];
+    byte operation;           // Not in CRC
+    byte crc[2];              // Not in CRC
     byte fixedTBD_1[2];
     byte controllerID[3];
     byte command;
-    byte parameter;
-    byte status;
+    byte param1;
+    byte param2;
 };
 
 class Light {
@@ -139,11 +149,11 @@ private:
         int payloadSize = packetSize - 3;
 
         byte payload[] = {
-            packet.deviceType, packet.length, 
+            packet.msgType, packet.length, 
             packet.fixedTBD_0[0], packet.fixedTBD_0[1], packet.fixedTBD_0[2],
             packet.fixedTBD_1[0], packet.fixedTBD_1[1], 
             packet.controllerID[0], packet.controllerID[1], packet.controllerID[2], 
-            packet.command, packet.parameter, packet.status
+            packet.command, packet.param1, packet.param2
         };
         crc_t crc = crc_init();
         crc = crc_update(crc, payload, payloadSize);
@@ -170,7 +180,7 @@ public:
         packet.syncWord[1] = 0xA4;
         packet.syncWord[2] = 0x23;
 
-        packet.deviceType = 0x03;
+        packet.msgType = 0x03;
 
         packet.length = 0x00;
 
@@ -190,16 +200,16 @@ public:
         memcpy(packet.controllerID, controllerID, 3);
 
         packet.command = 0x00;
-        packet.parameter = 0x00;
-        packet.status = 0x00;
+        packet.param1 = 0x00;
+        packet.param2 = 0x00;
     }
 
     void turnOn() {
         packet.length = 0x10;
         packet.operation = 0xE7;
         packet.command = 0x04;
-        packet.parameter = 0x02;
-        packet.status = 0x01;
+        packet.param1 = 0x02;
+        packet.param2 = 0x01;
         sendPacket();
     }
 
@@ -207,8 +217,8 @@ public:
         packet.length = 0x10;
         packet.operation = 0xE7;
         packet.command = 0x04;
-        packet.parameter = 0x02;
-        packet.status = 0x00;
+        packet.param1 = 0x02;
+        packet.param2 = 0x00;
         sendPacket();
     }
 
@@ -237,7 +247,7 @@ public:
         packet.length = 0x0F;
         packet.operation = 0x2A;
         packet.command = 0x05;
-        packet.parameter = 0x00;
+        packet.param1 = 0x00;
         sendPacket();
     }
 
@@ -245,14 +255,14 @@ public:
         packet.length = 0x0F;
         packet.operation = 0x2A;
         packet.command = 0x08;
-        packet.parameter = 0x01;
+        packet.param1 = 0x01;
         sendPacket();
     }
     void unbind() {
         packet.length = 0x0F;
         packet.operation = 0x2A;
         packet.command = 0x08;
-        packet.parameter = 0x02;
+        packet.param1 = 0x02;
         sendPacket();
     }
 
