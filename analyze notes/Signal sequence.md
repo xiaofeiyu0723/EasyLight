@@ -373,18 +373,27 @@ For example, in ADD
 //         __ __ __          ↑↑    __ __ __ ++
 ```
 
-The 9B seems like a FACTORY CODE?
+~~The 9B seems like a FACTORY CODE?~~
 
-Even if a command is identical **except for this part**
+~~Even if a command is identical **except for this part**~~
 
-It will be considered unauthorized by the controller
+~~It will be considered unauthorized by the controller~~
+
+
+--
 
 I have try to change the 9B to 9C
 
-When Use Gateway, everything is OK
+~~When Use Gateway, everything is OK~~
 
-But when I try to use this 9C to bind a switch to the gateway
+~~But when I try to use this 9C to bind a switch to the gateway~~
 
-It can bind successfully (the LED on the controller will flash and then turn off)
+~~It can bind successfully (the LED on the controller will flash and then turn off)~~
 
-But the switch can not control the light
+~~But the switch can not control the light~~
+
+The switch which can not control the light seems like not affected by the 9C
+
+Accidentally, I found that the 9B may also lead to the same issue
+
+In this case, I Send Switch Unbind Command (08 02), and then Send Switch Bind Command (08 01), it finally works.
