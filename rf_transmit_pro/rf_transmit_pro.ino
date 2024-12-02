@@ -60,11 +60,40 @@
 
 // #======================== Definitions ========================#
 
-// Pinout
+// Pinout ========================
+/* 
+  @@@ Caution @@@ 
+    Please check the pinout of your board，otherwise it may lead to the flash destroyed !!!
+    If it happens, you force to flash the bootloader to the board.
+    (Press and hold the BOOT button, then POWER ON again to enter burning mode)
+    Then, in the Arduino IDE, select the correct board and port, and burn the bootloader.
+*/
+
+
+// For ESP8266
 #define PIN_CS 15
 #define PIN_GDO0 5
 #define PIN_RST RADIOLIB_NC
 #define PIN_GDO2 4
+
+
+/*
+// For ESP32
+#define PIN_CS 5
+#define PIN_GDO0 21
+#define PIN_RST RADIOLIB_NC
+#define PIN_GDO2 22
+*/
+
+/*
+// For ESP32-C3
+#define PIN_CS 7
+#define PIN_GDO0 3
+#define PIN_RST RADIOLIB_NC
+#define PIN_GDO2 2
+*/
+
+// Pinout end ========================
 
 // Serial
 #define SERIAL_BAUD 9600
@@ -92,7 +121,7 @@ void setFlag(void)
 
 // #======================== Variables ========================#
 
-CC1101 radio = new Module(15, 5, RADIOLIB_NC, 4);
+CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
 
 // #======================== Prototypes ========================#
 
