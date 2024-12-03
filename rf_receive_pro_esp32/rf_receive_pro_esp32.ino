@@ -173,7 +173,11 @@ void loop()
       Serial.print(byteArr[i], HEX);
       Serial.print(F(" "));
     }
-    Serial.println();
+    
+    Serial.print("\tRSSI: ");
+    Serial.print(radio.getRSSI());
+    Serial.print(" dBm\tLQI: ");
+    Serial.println(radio.getLQI());
     
 
     if (state == RADIOLIB_ERR_NONE)
@@ -181,6 +185,27 @@ void loop()
       // if (radio.getRSSI() > PACKET_RSSI_THRESHOLD) {
       if (byteArr[0] == PACKET_THIRD_SYNC_WORD)
       {
+
+        switch (byteArr[1])
+        {
+          case 0x01:
+            Serial.println("【Controller response to the Switch】");
+            break;
+          case 0x03:
+            Serial.println("【Gateway send to the Controller】");
+            break;
+          case 0x04:
+            Serial.println("【Controller response to the Gateway】");
+            break;
+          default:
+            Serial.print("【Unknown Packet Type: ");
+            Serial.println(byteArr[1], HEX);
+            break;
+        }
+            
+
+
+        // ============== Switch Packet ==============
 
         // Verify CRC and only continue if valid
         byte payload[] = {byteArr[1], byteArr[2], byteArr[3], byteArr[4], byteArr[5]}; // SwitchID + ButtonID
@@ -201,11 +226,12 @@ void loop()
           Serial.print(switchIDStr);
           Serial.print("\tButtonID: ");
           Serial.print(buttonIDStr);
-          Serial.print("\tRSSI: ");
-          Serial.print(radio.getRSSI());
-          Serial.print(" dBm\tLQI: ");
-          Serial.println(radio.getLQI());
+          Serial.println();
+
         } // CRC check
+
+        // ============== Switch Packet End ==============
+
       } // Third Sync Word check
       //} // RSSI check
     }
