@@ -331,6 +331,44 @@ void messageRouter(cppQueue *topicStack, String payload)
             // unknown
         }
 
+        else if (item == "state" && bridge_id.length() == 12 && controller_id.length() == 6)
+        {
+            if (topicStack->isEmpty())
+            {
+                Serial.println("\t\t\tState parameter is missing!");
+                return;
+            }
+
+            String state_param;
+            topicStack->pop(&state_param);
+
+            // do action
+            if (state_param == "get")
+            {
+                Serial.print("\t\t\t[Getting] State: "); // TAKE ACTION
+                Serial.println(payload);
+
+                // Publish State
+                String topic = "easylight/" + bridge_id + "/controller/" + controller_id + "/state";
+                mqttClient.publish(topic.c_str(), "ONLINE");
+                Serial.print("[MQTT] Published to ");
+                Serial.print(topic);
+                Serial.print(" with payload: ");
+                Serial.println("ONLINE");
+
+                return;
+            }
+            // next level
+
+            // unknown
+            else
+            {
+                Serial.print("\t\t\tInvalid State Operation: ");
+                Serial.println(state_param);
+                return;
+            }
+        }
+
         else if (item == "light" && bridge_id.length() == 12 && controller_id.length() == 6)
         {
             if (topicStack->isEmpty())
@@ -383,6 +421,23 @@ void messageRouter(cppQueue *topicStack, String payload)
                 Serial.println(payload);
                 return;
             }
+
+            if (power_param == "get")
+            {
+                Serial.print("\t\t\t\t[Getting] Power: "); // TAKE ACTION
+                Serial.println(payload);
+
+                // Publish Power
+                String topic = "easylight/" + bridge_id + "/controller/" + controller_id + "/light/" + light_id + "/power";
+                mqttClient.publish(topic.c_str(), "ON");
+                Serial.print("[MQTT] Published to ");
+                Serial.print(topic);
+                Serial.print(" with payload: ");
+                Serial.println("ON");
+
+                return;
+            }
+
             // next level
 
             // unknown
@@ -451,14 +506,19 @@ int hexToBytes(const String &hex, byte *bytes)
 }
 
 /*
-    easylight/C049EFCC9FFF/controller/add                             -> CONTROLLER_ADD    4
-    easylight/C049EFCC9FFF/controller/remove                          -> CONTROLLER_REMOVE 4
-    easylight/C049EFCC9FFF/controller/36F9FF/reset                    -> CONTROLLER_RESET  4
-    // easylight/C049EFCC9FFF/controller/36F9FF/state
-    // easylight/C049EFCC9FFF/controller/36F9FF/light/1/power
-    easylight/C049EFCC9FFF/controller/36F9FF/light/1/power/set        -> LIGHT_POWER_SET   8
-    easylight/C049EFCC9FFF/controller/36F9FF/switch/add               -> SWITCH_ADD        6
-    easylight/C049EFCC9FFF/controller/36F9FF/switch/remove            -> SWITCH_REMOVE     6
+    // Subscribe
+    easylight/C049EFCC9FFF/controller/add                           - PAYLOAD: 36F9FF
+    easylight/C049EFCC9FFF/controller/remove                        - PAYLOAD: 36F9FF
+    easylight/C049EFCC9FFF/controller/36F9FF/reset                  - PAYLOAD: NULL
+    easylight/C049EFCC9FFF/controller/36F9FF/state/get              - PAYLOAD: NULL         (QUERY)      
+    easylight/C049EFCC9FFF/controller/36F9FF/light/1/power/set      - PAYLOAD: ON/OFF
+    easylight/C049EFCC9FFF/controller/36F9FF/light/1/power/get      - PAYLOAD: NULL         (QUERY)
+    easylight/C049EFCC9FFF/controller/36F9FF/light/1/switch/add     - PAYLOAD: NULL
+    easylight/C049EFCC9FFF/controller/36F9FF/light/1/switch/remove  - PAYLOAD: NULL
+    
+    // Publish
+    easylight/C049EFCC9FFF/controller/36F9FF/state                  - PAYLOAD: ONLINE/OFFLINE
+    easylight/C049EFCC9FFF/controller/36F9FF/light/1/power          - PAYLOAD: ON/OFF 
 
 */
 
