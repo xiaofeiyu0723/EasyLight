@@ -1,6 +1,8 @@
 #include <WiFi.h>
-#include <PubSubClient.h>
 #include <esp_mac.h>
+
+#include <PubSubClient.h> // https://github.com/knolleary/pubsubclient
+#include <cppQueue.h>     // https://github.com/SMFSW/Queue
 
 #include ".config/mqtt_config.h" // MQTT & WIFI Configurations (Private)
 
@@ -31,8 +33,11 @@
 void mqtt_callback(char *topic, byte *payload, unsigned int length);
 boolean mqtt_reconnect();
 
-int parseMQTTTopic(String topic, String topicLevels[]);
+// int parseMQTTTopic(String topic, String topicLevels[]);
+int parseMQTTTopic2stack(String topic, cppQueue *topicStack);
 int hexToBytes(const String &hex, byte *bytes);
+
+void messageRouter(cppQueue *topicStack, String payload = "");
 
 // #======================== Variables ========================#
 
@@ -40,6 +45,9 @@ WiFiClient espClient;
 PubSubClient mqttClient(MQTT_BROKER, MQTT_PORT, mqtt_callback, espClient);
 long lastMQTTReconnectAttempt = 0;
 String macAddress_s; // MAC Address with out ':'
+
+// A stack of topics
+cppQueue topicStack(sizeof(String), ROUTER_MAX_LEVELS, LIFO);
 
 // #======================== Initialization ========================#
 
@@ -141,22 +149,39 @@ void mqtt_callback(char *topic, byte *payload, unsigned int length)
     Serial.print("[MQTT] Message arrived [");
     Serial.print(topic);
     Serial.print("] ");
+
+    // Payload 2 String
+    String payload_s = "";
     for (int i = 0; i < length; i++)
     {
-        Serial.print((char)payload[i]);
+        payload_s += (char)payload[i];
     }
-    Serial.println();
+    Serial.println(payload_s);
 
-    // Levels
-    String topicLevels[ROUTER_MAX_LEVELS];
-    int levelCount = parseMQTTTopic(topic, topicLevels);
-    for (int i = 0; i < levelCount; i++)
-    {
-        Serial.print("\tLevel ");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.println(topicLevels[i]);
-    }
+    // Stack
+    int stackSize = parseMQTTTopic2stack(topic, &topicStack);
+    // for (int i = 0; i < stackSize; i++)
+    // {
+    //     String item;
+    //     topicStack.pop(&item);
+    //     Serial.print("\tStack ");
+    //     Serial.print(i);
+    //     Serial.print(": ");
+    //     Serial.println(item);
+    // }
+
+    messageRouter(&topicStack, payload_s);
+
+    // // Levels
+    // String topicLevels[ROUTER_MAX_LEVELS];
+    // int levelCount = parseMQTTTopic(topic, topicLevels);
+    // for (int i = 0; i < levelCount; i++)
+    // {
+    //     Serial.print("\tLevel ");
+    //     Serial.print(i);
+    //     Serial.print(": ");
+    //     Serial.println(topicLevels[i]);
+    // }
 }
 
 boolean mqtt_reconnect()
@@ -182,22 +207,47 @@ boolean mqtt_reconnect()
     return mqttClient.connected();
 }
 
-int parseMQTTTopic(String topic, String topicLevels[])
+// int parseMQTTTopic(String topic, String topicLevels[])
+// {
+//     int levelCount = 0;
+//     int lastIndex = 0;
+
+//     for (int i = 0; i < topic.length(); i++)
+//     {
+//         if (topic[i] == '/')
+//         {
+//             topicLevels[levelCount] = topic.substring(lastIndex, i);
+//             levelCount++;
+//             lastIndex = i + 1;
+//         }
+//     }
+
+//     topicLevels[levelCount] = topic.substring(lastIndex);
+//     levelCount++;
+
+//     return levelCount;
+// }
+
+int parseMQTTTopic2stack(String topic, cppQueue *topicStack)
 {
     int levelCount = 0;
-    int lastIndex = 0;
+    int lastIndex = topic.length();
 
-    for (int i = 0; i < topic.length(); i++)
+    // TODO: Validate the topic
+
+    for (int i = topic.length() - 1; i >= 0; i--)
     {
         if (topic[i] == '/')
         {
-            topicLevels[levelCount] = topic.substring(lastIndex, i);
+            String item = topic.substring(i + 1, lastIndex);
+            topicStack->push(&item);
             levelCount++;
-            lastIndex = i + 1;
+            lastIndex = i;
         }
     }
 
-    topicLevels[levelCount] = topic.substring(lastIndex);
+    String item = topic.substring(0, lastIndex);
+    topicStack->push(&item);
     levelCount++;
 
     return levelCount;
@@ -212,6 +262,170 @@ int hexToBytes(const String &hex, byte *bytes)
                    (hex[i * 2 + 1] > '9' ? hex[i * 2 + 1] - 'A' + 10 : hex[i * 2 + 1] - '0');
     }
     return len;
+}
+
+void messageRouter(cppQueue *topicStack, String payload)
+{
+    // Content
+    String bridge_id;
+    String controller_id;
+    String light_id;
+
+    while (!topicStack->isEmpty())
+    {
+        String item;
+        topicStack->pop(&item);
+        Serial.print("Stack Item: ");
+        Serial.println(item);
+
+        /*
+            LEVEL 1 TO SPECIFIC BRIDGE
+         */
+
+        if (item == "easylight")
+        {
+            if (topicStack->isEmpty())
+            {
+                Serial.println("\tBridge parameter is missing!");
+                return;
+            }
+            topicStack->pop(&bridge_id);
+            Serial.print("\tRouter to Bridge ID: "); // TO NEXT LEVEL
+            Serial.println(bridge_id);
+        }
+
+        /*
+            LEVEL 2 CONTROLLERS ACTION or TO SPECIFIC CONTROLLER
+        */
+
+        else if (item == "controller" && bridge_id.length() == 12)
+        {
+            if (topicStack->isEmpty())
+            {
+                Serial.println("\t\tController parameter is missing!");
+                return;
+            }
+
+            String controller_op;
+            topicStack->pop(&controller_op);
+
+            if (controller_op == "add")
+            {
+                Serial.print("\t\t[Bridge adding] controller: "); // TAKE ACTION
+                Serial.println(payload);
+                return;
+            }
+            else if (controller_op == "remove")
+            {
+                Serial.print("\t\t[Bridge removing] controller: "); // TAKE ACTION
+                Serial.println(payload);
+                return;
+            }
+            else if (controller_op.length() == 6)
+            {
+                Serial.print("\t\tRouter to Controller ID: "); // TO NEXT LEVEL
+                Serial.println(controller_op);
+                controller_id = controller_op;
+            }
+            else
+            {
+                Serial.print("\t\tInvalid Controller Operation: ");
+                Serial.println(controller_op);
+                return;
+            }
+        }
+
+        /*
+            LEVEL 3 SPECIFIC CONTROLLER ACTION or TO SPECIFIC LIGHT
+        */
+
+        else if (item == "reset" && bridge_id.length() == 12 && controller_id.length() == 6)
+        {
+            Serial.print("\t\t\t[Resetting] Controller: "); // TAKE ACTION
+            Serial.println(payload);
+            return;
+        }
+
+        else if (item == "light" && bridge_id.length() == 12 && controller_id.length() == 6)
+        {
+            if (topicStack->isEmpty())
+            {
+                Serial.println("\t\t\tLight parameter is missing!");
+                return;
+            }
+            topicStack->pop(&light_id);
+            Serial.print("\t\t\tRouter to Light ID: "); // TO NEXT LEVEL
+            Serial.println(light_id);
+        }
+
+        /*
+            LEVEL 4 SPECIFIC LIGHT ACTION
+        */
+
+        else if (item == "power" && bridge_id.length() == 12 && controller_id.length() == 6 && light_id.length() == 1)
+        {
+            if (topicStack->isEmpty())
+            {
+                Serial.println("\t\t\t\tPower parameter is missing!");
+                return;
+            }
+
+            String power_op;
+            topicStack->pop(&power_op);
+
+            if (power_op == "set")
+            {
+                Serial.print("\t\t\t\t[Setting] Power: "); // TAKE ACTION
+                Serial.println(payload);
+                return;
+            }
+            else
+            {
+                Serial.print("\t\t\t\tInvalid Power Operation: ");
+                Serial.println(power_op);
+                return;
+            }
+        }
+
+        else if (item == "switch" && bridge_id.length() == 12 && controller_id.length() == 6 && light_id.length() == 1)
+        {
+            if (topicStack->isEmpty())
+            {
+                Serial.println("\t\t\t\tSwitch parameter is missing!");
+                return;
+            }
+
+            String switch_op;
+            topicStack->pop(&switch_op);
+
+            if (switch_op == "add")
+            {
+                Serial.print("\t\t\t\t[Adding] Switch: "); // TAKE ACTION
+                Serial.println(payload);
+                return;
+            }
+            else if (switch_op == "remove")
+            {
+                Serial.print("\t\t\t\t[Removing] Switch: "); // TAKE ACTION
+                Serial.println(payload);
+                return;
+            }
+            else
+            {
+                Serial.print("\t\t\t\tInvalid Switch Operation: ");
+                Serial.println(switch_op);
+                return;
+            }
+        }
+
+        // ERROR
+
+        else
+        {
+            Serial.print("Invalid Item: ");
+            Serial.println(item);
+        }
+    }
 }
 
 /*
