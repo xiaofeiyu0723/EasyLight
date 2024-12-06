@@ -32,7 +32,7 @@ MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh...
 WiFiClientSecure Wifi_Client_S;
 MQTTClient MQTT_Client;
 
-unsigned long lastMillis = 0;
+unsigned long LastMillis = 0;
 String Client_ID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fxxefxxc0'
 
 // #======================== Prototypes ========================#
@@ -44,6 +44,8 @@ void mqtt_init();
 
 void wifi_connect_blocking();
 void mqtt_connect_blocking();
+
+void mqtt_disconnect();
 
 void cb_wifiConnected();
 void cb_mqttConnected();
@@ -74,9 +76,9 @@ void loop()
   }
 
   // publish a message roughly every second.
-  if (millis() - lastMillis > 3000)
+  if (millis() - LastMillis > 3000)
   {
-    lastMillis = millis();
+    LastMillis = millis();
     MQTT_Client.publish("hello", "world");
   }
 }
@@ -130,6 +132,12 @@ void mqtt_connect_blocking()
   cb_mqttConnected();
 }
 
+void mqtt_disconnect()
+{
+  MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "disconnected", true, 2);
+  MQTT_Client.disconnect();
+}
+
 // #======================== Callbacks ========================#
 
 void cb_wifiConnected()
@@ -141,7 +149,10 @@ void cb_wifiConnected()
 void cb_mqttConnected()
 {
   Serial.println("\n[MQTT] Connected!");
+  MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "init", true, 2);
   MQTT_Client.subscribe("hello");
+  // TODO: Add more subscriptions here
+  MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "ready", true, 2);
 }
 
 void cb_mqttMessageReceived(String &topic, String &payload)
