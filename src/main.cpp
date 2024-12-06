@@ -1,27 +1,18 @@
 #include <Arduino.h>
 
-#include <cppQueue.h>
-#include <PubSubClient.h>
-#include <WiFi.h>
-#include <RadioLib.h>
-#include <AceCRC.h>
+// put function declarations here:
+int myFunction(int, int);
 
-/*
-    Move Arduino code to PlatformIO
-    ToDo List:
-    - Support MQTT 5.0 (for no local)
-    - Decouple different modules
-    - Maybe use FreeRTOS
-    - Receive and Parse the response from controller
-*/
-
-void setup()
-{
-    Serial.begin(9600);
+void setup() {
+  // put your setup code here, to run once:
+  int result = myFunction(2, 3);
 }
 
-void loop()
-{
-    Serial.println("Hello PIO1 world!");
-    delay(1000);
+void loop() {
+  // put your main code here, to run repeatedly:
+}
+
+// put function definitions here:
+int myFunction(int x, int y) {
+  return x + y;
 }
