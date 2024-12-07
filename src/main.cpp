@@ -1,6 +1,7 @@
 #include <WiFiClientSecure.h>
 #include <MQTT.h>
 
+#include "el_radio.h"
 #include "el_wifi.h"
 #include "el_mqtt.h"
 
@@ -19,6 +20,9 @@ void cb_mqttMessageReceived(String &topic, String &payload);
 void setup()
 {
   Serial.begin(SERIAL_BAUD);
+
+  radio_init();
+  radio_setLoggerOutput(&Serial);
 
   wifi_init();
   wifi_setLoggerOutput(&Serial);
