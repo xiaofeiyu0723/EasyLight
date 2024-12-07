@@ -62,23 +62,18 @@ int radio_init()
     Radio.setCrcFiltering(false);
     // Radio.fixedPacketLengthMode(PACKET_LENGTH);
     Radio.setSyncWord(SYNC_WORD, SYNC_WORD_LENGTH);
-    if (state == RADIOLIB_ERR_NONE)
-    {
-        radio_log_print("[Radio] Initialized !\n");
-    }
-    else
+
+    if (state != RADIOLIB_ERR_NONE)
     {
         radio_log_print("[Radio] initialization failed: ");
         radio_log_print(String(state));
-        // while (true)
-        // {
-        //     delay(10);
-        // }
+        return -1;
     }
 
     Radio.setPacketReceivedAction(setReceivedFlag); // Callback on packet received
     Radio.setPacketSentAction(setTransmitFlag);     // Callback on packet sent
 
+    radio_log_print("[Radio] Initialized\n");
     radio_initialized = true;
     return 0;
 }

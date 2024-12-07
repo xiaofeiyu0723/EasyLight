@@ -42,16 +42,19 @@ int cb_mqttConnected();
 
 int mqtt_init()
 {
+    mqtt_log_print("[MQTT] Initializing ...\n");
     // check if wifi is initialized
     if (!wifi_isInitialized())
     {
-        mqtt_log_print("[MQTT] WiFi not initialized!");
+        mqtt_log_print("[MQTT] WiFi not initialized");
         return -1;
     }
 
     // TODO: Check if wifi is connected
 
     MQTT_Client.begin(MQTT_HOST, MQTT_PORT, *wifi_getClient());
+
+    mqtt_log_print("[MQTT] Initialized\n");
     mqtt_initialized = true;
     return 0;
 }

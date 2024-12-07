@@ -21,18 +21,24 @@ void setup()
 {
   Serial.begin(SERIAL_BAUD);
 
-  radio_init();
+  Serial.println(" #====== EasyLight Initializing ======#");
+
   radio_setLoggerOutput(&Serial);
-
-  wifi_init();
+  radio_init();
+  
   wifi_setLoggerOutput(&Serial);
-
-  mqtt_init();
+  wifi_init();
+  
   mqtt_setLoggerOutput(&Serial);
+  mqtt_init();
   mqtt_setCallback(cb_mqttMessageReceived);
 
-  // wifi_connect_blocking();
-  // mqtt_connect_blocking();
+  Serial.println(" #======== EasyLight Starting ========#");
+  
+  wifi_connect_blocking();
+  mqtt_connect_blocking();
+
+  Serial.println(" #========== EasyLight Ready =========#");
 }
 
 // #======================== Main Loop ========================#

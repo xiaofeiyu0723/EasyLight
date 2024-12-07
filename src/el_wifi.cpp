@@ -50,11 +50,14 @@ void cb_wifiConnected();
 
 int wifi_init()
 {
+  wifi_log_print("[WiFI] Initializing ...\n");
 #if defined(EASYLIGHT_ENABLE_TLS)
   Wifi_Client_S.setCACert(root_ca); // TLS
 #endif
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  wifi_log_print("[WiFI] Initialized\n");
   wifi_initialized = true;
   return 0;
 }
