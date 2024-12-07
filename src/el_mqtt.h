@@ -14,4 +14,7 @@ bool mqtt_isInitialized();
 int mqtt_setCallback(MQTTClientCallbackSimple cb);
 int mqtt_setLoggerOutput(Stream *s);
 
+// Pubublish
+int mqtt_publish_light_state(String controller_id, String light_id, String state);
+
 #endif // EL_MQTT_H

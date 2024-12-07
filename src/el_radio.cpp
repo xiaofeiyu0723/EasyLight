@@ -12,6 +12,14 @@ using namespace ace_crc::crc16ccitt_byte; // Select CRC algorithm
 #define PIN_RST RADIOLIB_NC
 #define PIN_GDO2 22
 
+/*
+// For ESP32-C3
+#define PIN_CS 7
+#define PIN_GDO0 3
+#define PIN_RST RADIOLIB_NC
+#define PIN_GDO2 2
+*/
+
 // RF Configurations
 #define RADIO_CARRIER_FREQUENCY 433.3   // MHz
 #define RADIO_BIT_RATE 250.0            // kbps
@@ -22,7 +30,7 @@ using namespace ace_crc::crc16ccitt_byte; // Select CRC algorithm
 
 // Packet
 #define PACKET_RSSI_THRESHOLD -100  // dBm (RSSI threshold for packet reception)
-#define PACKET_LENGTH 20            // The Bytes you want to receive (after the sync word)
+#define PACKET_LENGTH 24            // The Bytes you want to receive (after the sync word)
 uint8_t SYNC_WORD[] = {0x21, 0xA4}; // The [21 A4] would be better, [A4 23] is not working, I don't know why
 uint8_t SYNC_WORD_LENGTH = 2;
 #define PACKET_THIRD_SYNC_WORD 0x23
@@ -37,6 +45,8 @@ bool radio_initialized = false;
 volatile bool receivedFlag = false; // flag to indicate that a packet was received
 volatile bool transmitFlag = true;  // flag to indicate that a packet was transmitted
 
+void (*radio_receiveCallback)(byte *packet, size_t len);
+
 // #======================== Prototypes ========================#
 
 int radio_init();
@@ -44,10 +54,12 @@ int radio_handle();
 
 bool radio_isInitialized();
 
+int radio_setReceiveCallback(void (*cb)(byte *packet, size_t len));
 int radio_setLoggerOutput(Stream *s);
 
 // private
 int radio_log_print(String message);
+int message_validate(byte *packet, size_t len);
 
 // interrupt
 ICACHE_RAM_ATTR void setReceivedFlag(void);
@@ -60,18 +72,27 @@ int radio_init()
     radio_log_print("[Radio] Initializing ...\n");
     int state = Radio.begin(RADIO_CARRIER_FREQUENCY, RADIO_BIT_RATE, RADIO_FREQUENCY_DEVIATION, RADIO_RX_BANDWIDTH, RADIO_OUTPUT_POWER, RADIO_PREAMBLE_LENGTH);
     Radio.setCrcFiltering(false);
-    // Radio.fixedPacketLengthMode(PACKET_LENGTH);
+    Radio.fixedPacketLengthMode(PACKET_LENGTH);
     Radio.setSyncWord(SYNC_WORD, SYNC_WORD_LENGTH);
 
     if (state != RADIOLIB_ERR_NONE)
     {
-        radio_log_print("[Radio] initialization failed: ");
-        radio_log_print(String(state));
+        radio_log_print("[Radio] initialization failed: " + String(state) + "\n");
         return -1;
     }
 
     Radio.setPacketReceivedAction(setReceivedFlag); // Callback on packet received
     Radio.setPacketSentAction(setTransmitFlag);     // Callback on packet sent
+
+    // TODO: Manually start the receiver
+    radio_log_print("[Radio] Starting receiver ...\n");
+    state = Radio.startReceive();
+
+    if (state != RADIOLIB_ERR_NONE)
+    {
+        radio_log_print("[Radio] Start receive failed: " + String(state) + "\n");
+        return -1;
+    }
 
     radio_log_print("[Radio] Initialized\n");
     radio_initialized = true;
@@ -82,6 +103,53 @@ int radio_init()
 
 int radio_handle()
 {
+    if (receivedFlag)
+    {
+        receivedFlag = false;
+        byte packet[PACKET_LENGTH];
+        int state = Radio.readData(packet, PACKET_LENGTH);
+
+        if (state == RADIOLIB_ERR_NONE)
+        {
+            // Print the raw received packet
+            /*
+            radio_log_print("[Radio] Received: ");
+            for (int i = 0; i < PACKET_LENGTH; i++)
+            {
+                radio_log_print(String(packet[i], HEX) + " ");
+            }
+            radio_log_print("\n");
+            */
+
+            if (packet[0] == PACKET_THIRD_SYNC_WORD) // if not fixedPacketLengthMode(), the 0x23 will be ignored
+            {
+
+                // Validate the packet, and extract the effective part
+                byte effectivePacket[PACKET_LENGTH];
+                int effectivePacketLength = message_validate(packet, PACKET_LENGTH);
+                if (effectivePacketLength > 0)
+                {
+                    for (int i = 1; i <= effectivePacketLength; i++)
+                    {
+                        effectivePacket[i - 1] = packet[i];
+                    }
+                }
+
+                // If the packet is valid, call the callback
+                if (radio_receiveCallback && effectivePacketLength > 0)
+                {
+                    radio_receiveCallback(effectivePacket, effectivePacketLength);
+                }
+            }
+        }
+        else
+        {
+            radio_log_print("[Radio] Packet receive failed: " + String(state) + "\n");
+        }
+
+        Radio.startReceive(); // Restart the receiver !important!
+    }
+
     return 0;
 }
 
@@ -90,6 +158,12 @@ int radio_handle()
 bool radio_isInitialized()
 {
     return radio_initialized;
+}
+
+int radio_setReceiveCallback(void (*cb)(byte *packet, size_t len))
+{
+    radio_receiveCallback = cb;
+    return 0;
 }
 
 int radio_setLoggerOutput(Stream *s)
@@ -106,6 +180,76 @@ int radio_log_print(String message)
         Radio_Logger->print(message);
     }
     return 0;
+}
+
+int message_validate(byte *packet, size_t len)
+{
+    byte effectivePacket[PACKET_LENGTH];
+    uint8_t effectivePacketLength = PACKET_LENGTH;
+
+    // Different types of CRC validation
+    byte firstByte = packet[1];
+    if (firstByte == 0x01 || firstByte == 0x02 || firstByte == 0x04)
+    {
+        // 23 01 0C 00 12 34 C6 A3 86 56 01 01 41
+        //    __ __ __ __ __          __ __ __ __
+        effectivePacketLength = packet[2];
+        uint8_t payloadLength = effectivePacketLength - 3; // used to calculate the CRC
+
+        // radio_log_print("[Radio] efPkt Length: " + String(effectivePacketLength) + "\n");
+        // radio_log_print("[Radio] efPkt: ");
+        // for (int i = 0; i < effectivePacketLength; i++)
+        // {
+        //     radio_log_print(String(packet[i + 1], HEX) + " ");
+        // }
+        // radio_log_print("\n");
+
+        // Get the payload, two parts [1-5],[9-length]
+        byte msg_payload[PACKET_LENGTH];
+        for (int i = 1; i <= 5; i++) // [1,2,3,4,5]
+        {
+            msg_payload[i - 1] = packet[i];
+        }
+        for (int i = 9; i <= effectivePacketLength; i++) // [9,10,11,efPktLength]
+        {
+            msg_payload[i - 4] = packet[i];
+        }
+
+        // radio_log_print("[Radio] Payload: ");
+        // for (int i = 0; i < payloadLength; i++)
+        // {
+        //     radio_log_print(String(msg_payload[i], HEX) + " ");
+        // }
+        // radio_log_print("\n");
+
+        crc_t crc = crc_init();
+        crc = crc_update(crc, msg_payload, payloadLength);
+        crc = crc_finalize(crc);
+        unsigned long messageCRC = (packet[7] << 8) | packet[8];
+        // radio_log_print("[Radio] CRC: " + String(crc) + " Message CRC: " + String(messageCRC) + "\n");
+        if ((unsigned long)crc != messageCRC)
+        {
+            return 0;
+        }
+    }
+    else
+    {
+        // maybe switch packet
+        byte switch_payload[] = {packet[1], packet[2], packet[3], packet[4], packet[5]}; // SwitchID 4 + ButtonID 1
+
+        crc_t crc = crc_init();
+        crc = crc_update(crc, switch_payload, 5);
+        crc = crc_finalize(crc);
+        unsigned long messageCRC = (packet[6] << 8) | packet[7];
+        effectivePacketLength = 7; // 4 + 1 + 2
+
+        if ((unsigned long)crc != messageCRC)
+        {
+            return 0;
+        }
+    }
+
+    return effectivePacketLength;
 }
 
 // #======================== Callbacks ========================#

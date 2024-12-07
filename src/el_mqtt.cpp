@@ -34,6 +34,9 @@ bool mqtt_isInitialized();
 int mqtt_setCallback(MQTTClientCallbackSimple cb);
 int mqtt_setLoggerOutput(Stream *s);
 
+// Pubublish
+int mqtt_publish_light_state(String controller_id, String light_id, String state);
+
 // private
 int mqtt_log_print(String message);
 int cb_mqttConnected();
@@ -116,6 +119,14 @@ int mqtt_disconnect()
 {
     MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "disconnected", true, 2);
     MQTT_Client.disconnect();
+    return 0;
+}
+
+// Pubublish
+int mqtt_publish_light_state(String controller_id, String light_id, String state)
+{
+    String topic = "easylight/" + Client_ID + "/controller/" + controller_id + "/light/" + light_id + "/state";
+    MQTT_Client.publish(topic.c_str(), state.c_str(), true, 2);
     return 0;
 }
 
