@@ -17,15 +17,25 @@
 // #======================== Global Variables ========================#
 
 MQTTClient MQTT_Client;
+Stream *MQTT_Logger;
 String Client_ID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fxxefxxc0'
+bool mqtt_initialized = false;
 
 // #======================== Prototypes ========================#
 
 int mqtt_init();
 int mqtt_connect_blocking();
 int mqtt_disconnect();
-int mqtt_setCallback(MQTTClientCallbackSimple cb);
 
+int mqtt_handle();
+
+bool mqtt_isInitialized();
+
+int mqtt_setCallback(MQTTClientCallbackSimple cb);
+int mqtt_setLoggerOutput(Stream *s);
+
+// private
+int mqtt_log_print(String message);
 int cb_mqttConnected();
 
 // #======================== Initialization ========================#
@@ -35,13 +45,14 @@ int mqtt_init()
     // check if wifi is initialized
     if (!wifi_isInitialized())
     {
-        Serial.println("[MQTT] WiFi not initialized!");
+        mqtt_log_print("[MQTT] WiFi not initialized!");
         return -1;
     }
 
     // TODO: Check if wifi is connected
 
     MQTT_Client.begin(MQTT_HOST, MQTT_PORT, *wifi_getClient());
+    mqtt_initialized = true;
     return 0;
 }
 
@@ -49,11 +60,24 @@ int mqtt_init()
 
 int mqtt_handle()
 {
+    if (wifi_isInitialized() && wifi_isConnected() && !MQTT_Client.connected())
+    {
+        // Wifi is connected but MQTT is not connected
+        mqtt_log_print("[MQTT] Reconnecting...\n");
+        mqtt_connect_blocking();
+    }
+
     MQTT_Client.loop();
+
     return 0;
 }
 
 // #======================== Functions ========================#
+
+bool mqtt_isInitialized()
+{
+    return mqtt_initialized;
+}
 
 int mqtt_setCallback(MQTTClientCallbackSimple cb)
 {
@@ -61,18 +85,25 @@ int mqtt_setCallback(MQTTClientCallbackSimple cb)
     return 0;
 }
 
+int mqtt_setLoggerOutput(Stream *s)
+{
+    MQTT_Logger = s;
+    return 0;
+}
+
 int mqtt_connect_blocking()
 {
-    Serial.println("[MQTT] Client ID: " + Client_ID);
-    // Serial.print("[MQTT] Connecting to Host: [" + String(MQTT_HOST) + "] ");
-    Serial.print("[MQTT] Connecting ");
+    mqtt_log_print("[MQTT] Client ID: " + Client_ID + "\n");
+    // mqtt_log_print("[MQTT] Connecting to Host: [" + String(MQTT_HOST) + "] ");
+    mqtt_log_print("[MQTT] Connecting ");
 
     MQTT_Client.setWill(("easylight/" + Client_ID + "/$state").c_str(), "lost", true, 2); // LWT set brfore connect
     while (!MQTT_Client.connect(Client_ID.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
     {
-        Serial.print(".");
+        mqtt_log_print(".");
         delay(1000);
     }
+    mqtt_log_print("\n");
 
     cb_mqttConnected();
     return 0;
@@ -85,10 +116,21 @@ int mqtt_disconnect()
     return 0;
 }
 
+// private
+int mqtt_log_print(String message)
+{
+    if (MQTT_Logger)
+    {
+        MQTT_Logger->print(message);
+    }
+    return 0;
+}
+
 // #======================== Callbacks ========================#
 
 int cb_mqttConnected()
 {
+    mqtt_log_print("[MQTT] Connected!\n");
     MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "init", true, 2);
     MQTT_Client.subscribe("hello");
     // TODO: Add more subscriptions here
@@ -99,6 +141,3 @@ int cb_mqttConnected()
 // #======================== Interrupt ========================#
 
 // #======================== End ========================#
-
-
-

@@ -25,15 +25,26 @@ MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh...
 // #======================== Global Variables ========================#
 
 WiFiClientSecure Wifi_Client_S;
+Stream *Wifi_Logger;
 bool wifi_initialized = false;
 
 // #======================== Prototypes ========================#
 
 int wifi_init();
 int wifi_connect_blocking();
+int wifi_disconnect();
+
+int wifi_handle();
 
 bool wifi_isInitialized();
+bool wifi_isConnected();
 WiFiClientSecure *wifi_getClient();
+
+int wifi_setLoggerOutput(Stream *s);
+
+// private
+int wifi_log_print(String message);
+void cb_wifiConnected();
 
 // #======================== Initialization ========================#
 
@@ -50,22 +61,45 @@ int wifi_init()
 
 // #======================== Main ========================#
 
-int wifi_connect_blocking()
+int wifi_handle()
 {
-  Serial.print("[WiFI] Connecting to SSID: [" + String(WIFI_SSID) + "] ");
-  while (WiFi.status() != WL_CONNECTED)
+  if (wifi_isInitialized() && !wifi_isConnected())
   {
-    delay(1000);
+    wifi_log_print("[WiFI] Reconnecting...\n");
+    wifi_connect_blocking();
   }
-  //   cb_wifiConnected();
   return 0;
 }
 
 // #======================== Functions ========================#
 
+int wifi_connect_blocking()
+{
+  wifi_log_print("[WiFI] Connecting to SSID: [" + String(WIFI_SSID) + "] ");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    wifi_log_print(".");
+    delay(1000);
+  }
+  wifi_log_print("\n");
+  cb_wifiConnected();
+  return 0;
+}
+
+int wifi_disconnect()
+{
+  WiFi.disconnect();
+  return 0;
+}
+
 bool wifi_isInitialized()
 {
   return wifi_initialized;
+}
+
+bool wifi_isConnected()
+{
+  return WiFi.status() == WL_CONNECTED;
 }
 
 WiFiClientSecure *wifi_getClient()
@@ -73,12 +107,28 @@ WiFiClientSecure *wifi_getClient()
   return &Wifi_Client_S;
 }
 
+int wifi_setLoggerOutput(Stream *s)
+{
+  Wifi_Logger = s;
+  return 0;
+}
+
+// private
+int wifi_log_print(String message)
+{
+  if (Wifi_Logger)
+  {
+    Wifi_Logger->print(message);
+  }
+  return 0;
+}
+
 // #======================== Callbacks ========================#
 
 void cb_wifiConnected()
 {
-  Serial.println("\n[WiFI] Connected!");
-  Serial.println("[WiFI] IP: " + WiFi.localIP().toString());
+  wifi_log_print("[WiFI] Connected!\n");
+  wifi_log_print("[WiFI] IP: " + WiFi.localIP().toString() + "\n");
 }
 
 // #======================== Interrupt ========================#

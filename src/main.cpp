@@ -10,8 +10,6 @@
 
 // #======================== Global Variables ========================#
 
-unsigned long LastMillis = 0;
-
 // #======================== Prototypes ========================#
 
 void cb_mqttMessageReceived(String &topic, String &payload);
@@ -23,31 +21,23 @@ void setup()
   Serial.begin(SERIAL_BAUD);
 
   wifi_init();
+  wifi_setLoggerOutput(&Serial);
+
   mqtt_init();
+  mqtt_setLoggerOutput(&Serial);
   mqtt_setCallback(cb_mqttMessageReceived);
 
-  wifi_connect_blocking();
-  mqtt_connect_blocking();
+  // wifi_connect_blocking();
+  // mqtt_connect_blocking();
 }
 
 // #======================== Main Loop ========================#
 
 void loop()
 {
+  wifi_handle();
   mqtt_handle();
-  delay(10); // <- fixes some issues with WiFi stability
-
-  // if (!MQTT_Client.connected())
-  // {
-  //   startConnect();
-  // }
-
-  // publish a message roughly every second.
-  // if (millis() - LastMillis > 3000)
-  // {
-  //   LastMillis = millis();
-  //   MQTT_Client.publish("hello", "world");
-  // }
+  // delay(10); // <- fixes some issues with WiFi stability
 }
 
 // #======================== Functions ========================#
@@ -56,7 +46,7 @@ void loop()
 
 void cb_mqttMessageReceived(String &topic, String &payload)
 {
-  Serial.println("[MQTT]incoming: " + topic + " - " + payload);
+  Serial.println("MQTT Receive: " + topic + " - " + payload);
 
   // Note: Do not use the MQTT_Client in the callback to publish, subscribe or
   // unsubscribe as it may cause deadlocks when other things arrive while
