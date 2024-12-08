@@ -1,9 +1,11 @@
 #include <WiFiClientSecure.h>
 #include <MQTT.h>
 
-#include "el_radio.h"
-#include "el_wifi.h"
-#include "el_mqtt.h"
+#include "el_radio.h"     // Radio Module
+#include "el_wifi.h"      // WiFI Client
+#include "el_mqtt.h"      // MQTT Client
+#include "el_protocol.h"  // Protocol(Light)
+#include "el_service.h"   // Service(App)
 
 // #======================== Definitions ========================#
 
@@ -35,6 +37,9 @@ void setup()
   mqtt_init();
   mqtt_setCallback(cb_mqttMessageReceived);
 
+  protocol_setLoggerOutput(&Serial);
+  protocol_init();
+
   Serial.println(" #======== EasyLight Starting ========#");
   
   wifi_connect_blocking();
@@ -50,6 +55,7 @@ void loop()
   radio_handle();
   wifi_handle();
   mqtt_handle();
+  protocol_handle();
   // delay(10); // <- fixes some issues with WiFi stability
 }
 
