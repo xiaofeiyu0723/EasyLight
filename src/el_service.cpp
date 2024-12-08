@@ -1,5 +1,6 @@
 #include "el_service.h"
 #include <Arduino.h>
+#include "el_mqtt.h"
 
 // #======================== Definitions ========================#
 
@@ -45,6 +46,22 @@ int Service_setLoggerOutput(Stream *s)
 {
     serviceLogger = s;
     return 0;
+}
+
+
+// int mqtt_publish_light_state(String controller_id, String light_id, String state)
+// {
+//     String topic = "easylight/" + mqttClientID + "/controller/" + controller_id + "/light/" + light_id + "/state";
+//     mqttClient.publish(topic.c_str(), state.c_str(), true, 2);
+//     return 0;
+// }
+
+int Service_updateLightState(String controller_id, String light_id, String state)
+{
+    if (Mqtt_isInitialized() && Mqtt_isConnected())
+    {
+        Mqtt_publish("controller/" + controller_id + "/light/" + light_id + "/state", state);
+    }
 }
 
 int service_log_print(String message)

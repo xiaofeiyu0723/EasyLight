@@ -19,7 +19,8 @@
 
 MQTTClient mqttClient;
 Stream *mqttLogger;
-String mqttClientID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fxxefxxc0'
+String mqttClientID = "mqtt_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'mqtt_xx9fxxefxxc0'
+String mqttRootTopic = "mqtt/" + mqttClientID;
 bool mqttInitialized = false;
 
 // #======================== Prototypes ========================#
@@ -28,14 +29,17 @@ int Mqtt_init();
 int Mqtt_connect_blocking();
 int Mqtt_disconnect();
 int Mqtt_handle();
+int Mqtt_publish(String topic, String payload, bool retained, int qos);
 bool Mqtt_isInitialized();
+bool Mqtt_isConnected();
+MQTTClient *Mqtt_getClient();
+int Mqtt_setClientID(String id);
+int Mqtt_setRootTopic(String topic);
 int Mqtt_setCallback(MQTTClientCallbackSimple cb);
 int Mqtt_setLoggerOutput(Stream *s);
 
 int mqtt_log_print(String message);
 int cb_mqttConnected();
-
-int mqtt_publish_light_state(String controller_id, String light_id, String state);
 
 // #======================== Initialization ========================#
 
@@ -99,7 +103,7 @@ int Mqtt_connect_blocking()
     // mqtt_log_print("[MQTT] Connecting to Host: [" + String(MQTT_HOST) + "] ");
     mqtt_log_print("[MQTT] Connecting ");
 
-    mqttClient.setWill(("easylight/" + mqttClientID + "/$state").c_str(), "lost", true, 2); // LWT set brfore connect
+    mqttClient.setWill((mqttRootTopic + "/$state").c_str(), "lost", true, 2); // LWT set brfore connect
     while (!mqttClient.connect(mqttClientID.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
     {
         mqtt_log_print(".");
@@ -113,8 +117,39 @@ int Mqtt_connect_blocking()
 
 int Mqtt_disconnect()
 {
-    mqttClient.publish(("easylight/" + mqttClientID + "/$state").c_str(), "disconnected", true, 2);
+    mqttClient.publish((mqttRootTopic + "/$state").c_str(), "disconnected", true, 2);
     mqttClient.disconnect();
+    return 0;
+}
+
+int Mqtt_publish(String topic, String payload, bool retained, int qos)
+{
+    if (mqttClient.connected())
+    {
+        mqttClient.publish((mqttRootTopic + "/" + topic).c_str(), payload.c_str(), retained, qos);
+    }
+    return 0;
+}
+
+bool Mqtt_isConnected()
+{
+    return mqttClient.connected();
+}
+
+MQTTClient *Mqtt_getClient()
+{
+    return &mqttClient;
+}
+
+int Mqtt_setClientID(String id)
+{
+    mqttClientID = id;
+    return 0;
+}
+
+int Mqtt_setRootTopic(String topic) // DO NOT ADD '/' at the end
+{
+    mqttRootTopic = topic;
     return 0;
 }
 
@@ -127,23 +162,15 @@ int mqtt_log_print(String message)
     return 0;
 }
 
-// Pubublish
-int mqtt_publish_light_state(String controller_id, String light_id, String state)
-{
-    String topic = "easylight/" + mqttClientID + "/controller/" + controller_id + "/light/" + light_id + "/state";
-    mqttClient.publish(topic.c_str(), state.c_str(), true, 2);
-    return 0;
-}
-
 // #======================== Callbacks ========================#
 
 int cb_mqttConnected()
 {
     mqtt_log_print("[MQTT] Connected!\n");
-    mqttClient.publish(("easylight/" + mqttClientID + "/$state").c_str(), "init", true, 2);
+    mqttClient.publish((mqttRootTopic + "/$state").c_str(), "init", true, 2);
     mqttClient.subscribe("hello");
     // TODO: Add more subscriptions here
-    mqttClient.publish(("easylight/" + mqttClientID + "/$state").c_str(), "ready", true, 2);
+    mqttClient.publish((mqttRootTopic + "/$state").c_str(), "ready", true, 2);
     return 0;
 }
 

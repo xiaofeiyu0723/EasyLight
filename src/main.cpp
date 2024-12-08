@@ -13,6 +13,8 @@
 
 // #======================== Global Variables ========================#
 
+String deviceID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fxxefxxc0'
+
 // #======================== Prototypes ========================#
 
 void cb_mqttMessageReceived(String &topic, String &payload);
@@ -27,18 +29,23 @@ void setup()
   Serial.println(" #====== EasyLight Initializing ======#");
 
   Radio_setLoggerOutput(&Serial);
-  Radio_init();
   Radio_setReceiveCallback(cb_radioMessageReceived);
+  Radio_init();
   
   Wifi_setLoggerOutput(&Serial);
   Wifi_init();
   
   Mqtt_setLoggerOutput(&Serial);
-  Mqtt_init();
+  Mqtt_setClientID(deviceID);
+  Mqtt_setRootTopic("easylight/" + deviceID);
   Mqtt_setCallback(cb_mqttMessageReceived);
-
+  Mqtt_init();
+  
   Protocol_setLoggerOutput(&Serial);
   Protocol_init();
+
+  Service_setLoggerOutput(&Serial);
+  Service_init();
 
   Serial.println(" #======== EasyLight Starting ========#");
   
@@ -56,6 +63,7 @@ void loop()
   Wifi_handle();
   Mqtt_handle();
   Protocol_handle();
+  Service_handle();
   // delay(10); // <- fixes some issues with WiFi stability
 }
 
@@ -128,8 +136,8 @@ void cb_radioMessageReceived(uint8_t *packet, size_t len)
       Serial.print("\tController Type: ");
       Serial.println(controllerType);
 
-      // Publish to MQTT
-      mqtt_publish_light_state(controllerIdHex, controllerReqCode, controllerResValue);
+      // Update Light State
+      Service_updateLightState(controllerIdHex, controllerReqCode, controllerResValue);
     }
     else if(msgType == 0x02)
     {
