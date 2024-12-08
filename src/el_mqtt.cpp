@@ -1,4 +1,5 @@
 #include <el_mqtt.h>
+#include <Arduino.h>
 #include <el_wifi.h>
 #include <MQTT.h>
 
@@ -16,38 +17,33 @@
 
 // #======================== Global Variables ========================#
 
-MQTTClient MQTT_Client;
-Stream *MQTT_Logger;
-String Client_ID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fxxefxxc0'
-bool mqtt_initialized = false;
+MQTTClient mqttClient;
+Stream *mqttLogger;
+String mqttClientID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fxxefxxc0'
+bool mqttInitialized = false;
 
 // #======================== Prototypes ========================#
 
-int mqtt_init();
-int mqtt_connect_blocking();
-int mqtt_disconnect();
+int Mqtt_init();
+int Mqtt_connect_blocking();
+int Mqtt_disconnect();
+int Mqtt_handle();
+bool Mqtt_isInitialized();
+int Mqtt_setCallback(MQTTClientCallbackSimple cb);
+int Mqtt_setLoggerOutput(Stream *s);
 
-int mqtt_handle();
-
-bool mqtt_isInitialized();
-
-int mqtt_setCallback(MQTTClientCallbackSimple cb);
-int mqtt_setLoggerOutput(Stream *s);
-
-// Pubublish
-int mqtt_publish_light_state(String controller_id, String light_id, String state);
-
-// private
 int mqtt_log_print(String message);
 int cb_mqttConnected();
 
+int mqtt_publish_light_state(String controller_id, String light_id, String state);
+
 // #======================== Initialization ========================#
 
-int mqtt_init()
+int Mqtt_init()
 {
     mqtt_log_print("[MQTT] Initializing ...\n");
     // check if wifi is initialized
-    if (!wifi_isInitialized())
+    if (!Wifi_isInitialized())
     {
         mqtt_log_print("[MQTT] WiFi not initialized");
         return -1;
@@ -55,56 +51,56 @@ int mqtt_init()
 
     // TODO: Check if wifi is connected
 
-    MQTT_Client.begin(MQTT_HOST, MQTT_PORT, *wifi_getClient());
+    mqttClient.begin(MQTT_HOST, MQTT_PORT, *Wifi_getClient());
 
     mqtt_log_print("[MQTT] Initialized\n");
-    mqtt_initialized = true;
+    mqttInitialized = true;
     return 0;
 }
 
 // #======================== Main ========================#
 
-int mqtt_handle()
+int Mqtt_handle()
 {
-    if (wifi_isInitialized() && wifi_isConnected() && !MQTT_Client.connected())
+    if (Wifi_isInitialized() && Wifi_isConnected() && !mqttClient.connected())
     {
         // Wifi is connected but MQTT is not connected
         mqtt_log_print("[MQTT] Reconnecting...\n");
-        mqtt_connect_blocking();
+        Mqtt_connect_blocking();
     }
 
-    MQTT_Client.loop();
+    mqttClient.loop();
 
     return 0;
 }
 
 // #======================== Functions ========================#
 
-bool mqtt_isInitialized()
+bool Mqtt_isInitialized()
 {
-    return mqtt_initialized;
+    return mqttInitialized;
 }
 
-int mqtt_setCallback(MQTTClientCallbackSimple cb)
+int Mqtt_setCallback(MQTTClientCallbackSimple cb)
 {
-    MQTT_Client.onMessage(cb);
+    mqttClient.onMessage(cb);
     return 0;
 }
 
-int mqtt_setLoggerOutput(Stream *s)
+int Mqtt_setLoggerOutput(Stream *s)
 {
-    MQTT_Logger = s;
+    mqttLogger = s;
     return 0;
 }
 
-int mqtt_connect_blocking()
+int Mqtt_connect_blocking()
 {
-    mqtt_log_print("[MQTT] Client ID: " + Client_ID + "\n");
+    mqtt_log_print("[MQTT] Client ID: " + mqttClientID + "\n");
     // mqtt_log_print("[MQTT] Connecting to Host: [" + String(MQTT_HOST) + "] ");
     mqtt_log_print("[MQTT] Connecting ");
 
-    MQTT_Client.setWill(("easylight/" + Client_ID + "/$state").c_str(), "lost", true, 2); // LWT set brfore connect
-    while (!MQTT_Client.connect(Client_ID.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
+    mqttClient.setWill(("easylight/" + mqttClientID + "/$state").c_str(), "lost", true, 2); // LWT set brfore connect
+    while (!mqttClient.connect(mqttClientID.c_str(), MQTT_USERNAME, MQTT_PASSWORD))
     {
         mqtt_log_print(".");
         delay(1000);
@@ -115,28 +111,27 @@ int mqtt_connect_blocking()
     return 0;
 }
 
-int mqtt_disconnect()
+int Mqtt_disconnect()
 {
-    MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "disconnected", true, 2);
-    MQTT_Client.disconnect();
+    mqttClient.publish(("easylight/" + mqttClientID + "/$state").c_str(), "disconnected", true, 2);
+    mqttClient.disconnect();
+    return 0;
+}
+
+int mqtt_log_print(String message)
+{
+    if (mqttLogger)
+    {
+        mqttLogger->print(message);
+    }
     return 0;
 }
 
 // Pubublish
 int mqtt_publish_light_state(String controller_id, String light_id, String state)
 {
-    String topic = "easylight/" + Client_ID + "/controller/" + controller_id + "/light/" + light_id + "/state";
-    MQTT_Client.publish(topic.c_str(), state.c_str(), true, 2);
-    return 0;
-}
-
-// private
-int mqtt_log_print(String message)
-{
-    if (MQTT_Logger)
-    {
-        MQTT_Logger->print(message);
-    }
+    String topic = "easylight/" + mqttClientID + "/controller/" + controller_id + "/light/" + light_id + "/state";
+    mqttClient.publish(topic.c_str(), state.c_str(), true, 2);
     return 0;
 }
 
@@ -145,10 +140,10 @@ int mqtt_log_print(String message)
 int cb_mqttConnected()
 {
     mqtt_log_print("[MQTT] Connected!\n");
-    MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "init", true, 2);
-    MQTT_Client.subscribe("hello");
+    mqttClient.publish(("easylight/" + mqttClientID + "/$state").c_str(), "init", true, 2);
+    mqttClient.subscribe("hello");
     // TODO: Add more subscriptions here
-    MQTT_Client.publish(("easylight/" + Client_ID + "/$state").c_str(), "ready", true, 2);
+    mqttClient.publish(("easylight/" + mqttClientID + "/$state").c_str(), "ready", true, 2);
     return 0;
 }
 

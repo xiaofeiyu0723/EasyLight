@@ -3,10 +3,9 @@
 
 #include <Arduino.h>
 
-int service_init();
-int service_handle();
-bool service_isInitialized();
-
-int service_setLoggerOutput(Stream *s);
+int Service_init();
+int Service_handle();
+bool Service_isInitialized();
+int Service_setLoggerOutput(Stream *s);
 
 #endif // EL_SERVICE_H

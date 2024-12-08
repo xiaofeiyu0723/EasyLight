@@ -1,18 +1,16 @@
 #ifndef EL_MQTT_H
 #define EL_MQTT_H
 
+#include <Arduino.h>
 #include <MQTT.h>
 
-int mqtt_init();
-int mqtt_connect_blocking();
-int mqtt_disconnect();
-
-int mqtt_handle();
-
-bool mqtt_isInitialized();
-
-int mqtt_setCallback(MQTTClientCallbackSimple cb);
-int mqtt_setLoggerOutput(Stream *s);
+int Mqtt_init();
+int Mqtt_connect_blocking();
+int Mqtt_disconnect();
+int Mqtt_handle();
+bool Mqtt_isInitialized();
+int Mqtt_setCallback(MQTTClientCallbackSimple cb);
+int Mqtt_setLoggerOutput(Stream *s);
 
 // Pubublish
 int mqtt_publish_light_state(String controller_id, String light_id, String state);

@@ -1,3 +1,4 @@
+#include "el_radio.h"
 #include <Arduino.h>
 #include <RadioLib.h>
 #include <AceCRC.h>
@@ -37,29 +38,26 @@ uint8_t SYNC_WORD_LENGTH = 2;
 
 // #======================== Global Variables ========================#
 
-CC1101 Radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
-Stream *Radio_Logger;
-bool radio_initialized = false;
+CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
+Stream *radioLogger;
+bool radioInitialized = false;
 
 // Interrupts flags
 volatile bool receivedFlag = false; // flag to indicate that a packet was received
 volatile bool transmitFlag = true;  // flag to indicate that a packet was transmitted
 
-void (*radio_receiveCallback)(byte *packet, size_t len);
+void (*radioReceiveCallback)(byte *packet, size_t len);
 
 // #======================== Prototypes ========================#
 
-int radio_init();
-int radio_handle();
+int Radio_init();
+int Radio_handle();
+bool Radio_isInitialized();
+int Radio_setReceiveCallback(void (*cb)(byte *packet, size_t len));
+int Radio_setLoggerOutput(Stream *s);
 
-bool radio_isInitialized();
-
-int radio_setReceiveCallback(void (*cb)(byte *packet, size_t len));
-int radio_setLoggerOutput(Stream *s);
-
-// private
 int radio_log_print(String message);
-int message_validate(byte *packet, size_t len);
+int radio_message_validate(byte *packet, size_t len);
 
 // interrupt
 ICACHE_RAM_ATTR void setReceivedFlag(void);
@@ -67,13 +65,13 @@ ICACHE_RAM_ATTR void setTransmitFlag(void);
 
 // #======================== Initialization ========================#
 
-int radio_init()
+int Radio_init()
 {
     radio_log_print("[Radio] Initializing ...\n");
-    int state = Radio.begin(RADIO_CARRIER_FREQUENCY, RADIO_BIT_RATE, RADIO_FREQUENCY_DEVIATION, RADIO_RX_BANDWIDTH, RADIO_OUTPUT_POWER, RADIO_PREAMBLE_LENGTH);
-    Radio.setCrcFiltering(false);
-    Radio.fixedPacketLengthMode(PACKET_LENGTH);
-    Radio.setSyncWord(SYNC_WORD, SYNC_WORD_LENGTH);
+    int state = radio.begin(RADIO_CARRIER_FREQUENCY, RADIO_BIT_RATE, RADIO_FREQUENCY_DEVIATION, RADIO_RX_BANDWIDTH, RADIO_OUTPUT_POWER, RADIO_PREAMBLE_LENGTH);
+    radio.setCrcFiltering(false);
+    radio.fixedPacketLengthMode(PACKET_LENGTH);
+    radio.setSyncWord(SYNC_WORD, SYNC_WORD_LENGTH);
 
     if (state != RADIOLIB_ERR_NONE)
     {
@@ -81,12 +79,12 @@ int radio_init()
         return -1;
     }
 
-    Radio.setPacketReceivedAction(setReceivedFlag); // Callback on packet received
-    Radio.setPacketSentAction(setTransmitFlag);     // Callback on packet sent
+    radio.setPacketReceivedAction(setReceivedFlag); // Callback on packet received
+    radio.setPacketSentAction(setTransmitFlag);     // Callback on packet sent
 
     // TODO: Manually start the receiver
     radio_log_print("[Radio] Starting receiver ...\n");
-    state = Radio.startReceive();
+    state = radio.startReceive();
 
     if (state != RADIOLIB_ERR_NONE)
     {
@@ -95,19 +93,19 @@ int radio_init()
     }
 
     radio_log_print("[Radio] Initialized\n");
-    radio_initialized = true;
+    radioInitialized = true;
     return 0;
 }
 
 // #======================== Main ========================#
 
-int radio_handle()
+int Radio_handle()
 {
     if (receivedFlag)
     {
         receivedFlag = false;
         byte packet[PACKET_LENGTH];
-        int state = Radio.readData(packet, PACKET_LENGTH);
+        int state = radio.readData(packet, PACKET_LENGTH);
 
         if (state == RADIOLIB_ERR_NONE)
         {
@@ -126,7 +124,7 @@ int radio_handle()
 
                 // Validate the packet, and extract the effective part
                 byte effectivePacket[PACKET_LENGTH];
-                int effectivePacketLength = message_validate(packet, PACKET_LENGTH);
+                int effectivePacketLength = radio_message_validate(packet, PACKET_LENGTH);
                 if (effectivePacketLength > 0)
                 {
                     for (int i = 1; i <= effectivePacketLength; i++)
@@ -136,9 +134,9 @@ int radio_handle()
                 }
 
                 // If the packet is valid, call the callback
-                if (radio_receiveCallback && effectivePacketLength > 0)
+                if (radioReceiveCallback && effectivePacketLength > 0)
                 {
-                    radio_receiveCallback(effectivePacket, effectivePacketLength);
+                    radioReceiveCallback(effectivePacket, effectivePacketLength);
                 }
             }
         }
@@ -147,7 +145,7 @@ int radio_handle()
             radio_log_print("[Radio] Packet receive failed: " + String(state) + "\n");
         }
 
-        Radio.startReceive(); // Restart the receiver !important!
+        radio.startReceive(); // Restart the receiver !important!
     }
 
     return 0;
@@ -155,34 +153,33 @@ int radio_handle()
 
 // #======================== Functions ========================#
 
-bool radio_isInitialized()
+bool Radio_isInitialized()
 {
-    return radio_initialized;
+    return radioInitialized;
 }
 
-int radio_setReceiveCallback(void (*cb)(byte *packet, size_t len))
+int Radio_setReceiveCallback(void (*cb)(byte *packet, size_t len))
 {
-    radio_receiveCallback = cb;
+    radioReceiveCallback = cb;
     return 0;
 }
 
-int radio_setLoggerOutput(Stream *s)
+int Radio_setLoggerOutput(Stream *s)
 {
-    Radio_Logger = s;
+    radioLogger = s;
     return 0;
 }
 
-// private
 int radio_log_print(String message)
 {
-    if (Radio_Logger)
+    if (radioLogger)
     {
-        Radio_Logger->print(message);
+        radioLogger->print(message);
     }
     return 0;
 }
 
-int message_validate(byte *packet, size_t len)
+int radio_message_validate(byte *packet, size_t len)
 {
     byte effectivePacket[PACKET_LENGTH];
     uint8_t effectivePacketLength = PACKET_LENGTH;

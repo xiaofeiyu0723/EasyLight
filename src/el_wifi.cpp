@@ -1,4 +1,5 @@
 #include <el_wifi.h>
+#include <Arduino.h>
 #include <WiFiClientSecure.h>
 
 // #======================== Definitions ========================#
@@ -24,59 +25,55 @@ MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh...
 
 // #======================== Global Variables ========================#
 
-WiFiClientSecure Wifi_Client_S;
-Stream *Wifi_Logger;
-bool wifi_initialized = false;
+WiFiClientSecure wifiClient_s;
+Stream *wifiLogger;
+bool wifiInitialized = false;
 
 // #======================== Prototypes ========================#
 
-int wifi_init();
-int wifi_connect_blocking();
-int wifi_disconnect();
+int Wifi_init();
+int Wifi_connect_blocking();
+int Wifi_disconnect();
+int Wifi_handle();
+bool Wifi_isInitialized();
+bool Wifi_isConnected();
+WiFiClientSecure *Wifi_getClient();
+int Wifi_setLoggerOutput(Stream *s);
 
-int wifi_handle();
-
-bool wifi_isInitialized();
-bool wifi_isConnected();
-WiFiClientSecure *wifi_getClient();
-
-int wifi_setLoggerOutput(Stream *s);
-
-// private
 int wifi_log_print(String message);
 void cb_wifiConnected();
 
 // #======================== Initialization ========================#
 
-int wifi_init()
+int Wifi_init()
 {
   wifi_log_print("[WiFI] Initializing ...\n");
 #if defined(EASYLIGHT_ENABLE_TLS)
-  Wifi_Client_S.setCACert(root_ca); // TLS
+  wifiClient_s.setCACert(root_ca); // TLS
 #endif
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   wifi_log_print("[WiFI] Initialized\n");
-  wifi_initialized = true;
+  wifiInitialized = true;
   return 0;
 }
 
 // #======================== Main ========================#
 
-int wifi_handle()
+int Wifi_handle()
 {
-  if (wifi_isInitialized() && !wifi_isConnected())
+  if (Wifi_isInitialized() && !Wifi_isConnected())
   {
     wifi_log_print("[WiFI] Reconnecting...\n");
-    wifi_connect_blocking();
+    Wifi_connect_blocking();
   }
   return 0;
 }
 
 // #======================== Functions ========================#
 
-int wifi_connect_blocking()
+int Wifi_connect_blocking()
 {
   wifi_log_print("[WiFI] Connecting to SSID: [" + String(WIFI_SSID) + "] ");
   while (WiFi.status() != WL_CONNECTED)
@@ -89,39 +86,38 @@ int wifi_connect_blocking()
   return 0;
 }
 
-int wifi_disconnect()
+int Wifi_disconnect()
 {
   WiFi.disconnect();
   return 0;
 }
 
-bool wifi_isInitialized()
+bool Wifi_isInitialized()
 {
-  return wifi_initialized;
+  return wifiInitialized;
 }
 
-bool wifi_isConnected()
+bool Wifi_isConnected()
 {
   return WiFi.status() == WL_CONNECTED;
 }
 
-WiFiClientSecure *wifi_getClient()
+WiFiClientSecure *Wifi_getClient()
 {
-  return &Wifi_Client_S;
+  return &wifiClient_s;
 }
 
-int wifi_setLoggerOutput(Stream *s)
+int Wifi_setLoggerOutput(Stream *s)
 {
-  Wifi_Logger = s;
+  wifiLogger = s;
   return 0;
 }
 
-// private
 int wifi_log_print(String message)
 {
-  if (Wifi_Logger)
+  if (wifiLogger)
   {
-    Wifi_Logger->print(message);
+    wifiLogger->print(message);
   }
   return 0;
 }

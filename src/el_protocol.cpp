@@ -5,54 +5,53 @@
 
 // #======================== Global Variables ========================#
 
-Stream *Protocol_Logger;
-bool protocol_initialized = false;
+Stream *protocolLogger;
+bool protocolInitialized = false;
 
 // #======================== Prototypes ========================#
 
-int protocol_init();
-int protocol_handle();
-bool protocol_isInitialized();
+int Protocol_init();
+int Protocol_handle();
+bool Protocol_isInitialized();
 
 int protocol_log_print(String message);
 
 // #======================== Initialization ========================#
 
-int protocol_init()
+int Protocol_init()
 {
     protocol_log_print("[Protocol] Initializing ...\n");
 
     protocol_log_print("[Protocol] Initialized\n");
-    protocol_initialized = true;
+    protocolInitialized = true;
     return 0;
 }
 
 // #======================== Main ========================#
 
-int protocol_handle()
+int Protocol_handle()
 {
     return 0;
 }
 
 // #======================== Functions ========================#
 
-bool protocol_isInitialized()
+bool Protocol_isInitialized()
 {
-    return protocol_initialized;
+    return protocolInitialized;
 }
 
-int protocol_setLoggerOutput(Stream *s)
+int Protocol_setLoggerOutput(Stream *s)
 {
-    Protocol_Logger = s;
+    protocolLogger = s;
     return 0;
 }
 
-// private
 int protocol_log_print(String message)
 {
-    if (Protocol_Logger)
+    if (protocolLogger)
     {
-        Protocol_Logger->print(message);
+        protocolLogger->print(message);
     }
     return 0;
 }

@@ -3,10 +3,9 @@
 
 #include <Arduino.h>
 
-int protocol_init();
-int protocol_handle();
-bool protocol_isInitialized();
-
-int protocol_setLoggerOutput(Stream *s);
+int Protocol_init();
+int Protocol_handle();
+bool Protocol_isInitialized();
+int Protocol_setLoggerOutput(Stream *s);
 
 #endif // EL_PROTOCOL_H

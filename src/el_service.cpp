@@ -5,54 +5,53 @@
 
 // #======================== Global Variables ========================#
 
-Stream *Service_Logger;
-bool service_initialized = false;
+Stream *serviceLogger;
+bool serviceInitialized = false;
 
 // #======================== Prototypes ========================#
 
-int service_init();
-int service_handle();
-bool service_isInitialized();
+int Service_init();
+int Service_handle();
+bool Service_isInitialized();
 
 int service_log_print(String message);
 
 // #======================== Initialization ========================#
 
-int service_init()
+int Service_init()
 {
     service_log_print("[Service] Initializing ...\n");
 
     service_log_print("[Service] Initialized\n");
-    service_initialized = true;
+    serviceInitialized = true;
     return 0;
 }
 
 // #======================== Main ========================#
 
-int service_handle()
+int Service_handle()
 {
     return 0;
 }
 
 // #======================== Functions ========================#
 
-bool service_isInitialized()
+bool Service_isInitialized()
 {
-    return service_initialized;
+    return serviceInitialized;
 }
 
-int service_setLoggerOutput(Stream *s)
+int Service_setLoggerOutput(Stream *s)
 {
-    Service_Logger = s;
+    serviceLogger = s;
     return 0;
 }
 
-// private
 int service_log_print(String message)
 {
-    if (Service_Logger)
+    if (serviceLogger)
     {
-        Service_Logger->print(message);
+        serviceLogger->print(message);
     }
     return 0;
 }
