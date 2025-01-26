@@ -41,7 +41,7 @@ WiFiClientSecure *Wifi_getClient();
 int Wifi_setLoggerOutput(Stream *s);
 
 int wifi_log_print(String message);
-void cb_wifiConnected();
+void wifi_connectedCallback();
 
 // #======================== Initialization ========================#
 
@@ -82,7 +82,7 @@ int Wifi_connect_blocking()
     delay(1000);
   }
   wifi_log_print("\n");
-  cb_wifiConnected();
+  wifi_connectedCallback();
   return 0;
 }
 
@@ -124,7 +124,7 @@ int wifi_log_print(String message)
 
 // #======================== Callbacks ========================#
 
-void cb_wifiConnected()
+void wifi_connectedCallback()
 {
   wifi_log_print("[WiFI] Connected!\n");
   wifi_log_print("[WiFI] IP: " + WiFi.localIP().toString() + "\n");

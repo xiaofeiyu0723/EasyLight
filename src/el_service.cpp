@@ -1,6 +1,7 @@
 #include "el_service.h"
 #include <Arduino.h>
 #include "el_mqtt.h"
+#include "el_radio.h"
 
 // #======================== Definitions ========================#
 
@@ -14,6 +15,9 @@ bool serviceInitialized = false;
 int Service_init();
 int Service_handle();
 bool Service_isInitialized();
+
+int Service_mqttReportControllerResponse(String controller_id, String req_code, String res_value, String type);
+int Service_radioSendControllerStateQuery(String controller_id);
 
 int service_log_print(String message);
 
@@ -48,20 +52,27 @@ int Service_setLoggerOutput(Stream *s)
     return 0;
 }
 
-
-// int mqtt_publish_light_state(String controller_id, String light_id, String state)
-// {
-//     String topic = "easylight/" + mqttClientID + "/controller/" + controller_id + "/light/" + light_id + "/state";
-//     mqttClient.publish(topic.c_str(), state.c_str(), true, 2);
-//     return 0;
-// }
-
-int Service_updateLightState(String controller_id, String light_id, String state)
+int Service_mqttReportControllerResponse(String controller_id, String req_code, String res_value, String type)
 {
     if (Mqtt_isInitialized() && Mqtt_isConnected())
     {
-        Mqtt_publish("controller/" + controller_id + "/light/" + light_id + "/state", state);
+        Mqtt_publish("controller/" + controller_id + "/response", req_code + " " + res_value + " " + type);
     }
+    return 0;
+}
+
+int Service_radioSendControllerStateQuery(String controller_id)
+{
+    if (controller_id.length() != 6)
+    {
+        return -1;
+    }
+
+    if (Radio_isInitialized())
+    {
+        Radio_sendRequestToController(controller_id, 0x03, 0x2A, 0X05, 0x00);
+    }
+    return 0;
 }
 
 int service_log_print(String message)

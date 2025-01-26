@@ -19,6 +19,7 @@ String deviceID = "el_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'el_xx9fx
 
 void cb_mqttMessageReceived(String &topic, String &payload);
 void cb_radioMessageReceived(uint8_t *packet, size_t len);
+void cb_radioTransmitDone();
 
 // #======================== Initialization ========================#
 
@@ -30,6 +31,7 @@ void setup()
 
   Radio_setLoggerOutput(&Serial);
   Radio_setReceiveCallback(cb_radioMessageReceived);
+  Radio_setTransmitDoneCallback(cb_radioTransmitDone);
   Radio_init();
   
   Wifi_setLoggerOutput(&Serial);
@@ -101,6 +103,11 @@ void cb_mqttMessageReceived(String &topic, String &payload)
   // or push to a queue and handle it in the loop after calling `mqttClient.loop()`.
 
   // TODO: Handle MQTT messages
+  if (topic == "test"){
+    Serial.println("Start Test");
+    Service_radioSendControllerStateQuery("36F98D");
+    Serial.println("End Test");
+  }
 }
 
 void cb_radioMessageReceived(uint8_t *packet, size_t len)
@@ -136,8 +143,7 @@ void cb_radioMessageReceived(uint8_t *packet, size_t len)
       Serial.print("\tController Type: ");
       Serial.println(controllerType);
 
-      // Update Light State
-      Service_updateLightState(controllerIdHex, controllerReqCode, controllerResValue);
+      Service_mqttReportControllerResponse(controllerIdHex, controllerReqCode, controllerResValue, controllerType);
     }
     else if(msgType == 0x02)
     {
@@ -162,6 +168,11 @@ void cb_radioMessageReceived(uint8_t *packet, size_t len)
     Serial.println(switchKeyHex);
   }
 
+}
+
+void cb_radioTransmitDone()
+{
+  Serial.println("Radio Transmit Done");
 }
 
 // #======================== Interrupt ========================#

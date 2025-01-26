@@ -22,6 +22,7 @@ Stream *mqttLogger;
 String mqttClientID = "mqtt_" + String(ESP.getEfuseMac(), HEX); // Unique ID 'mqtt_xx9fxxefxxc0'
 String mqttRootTopic = "mqtt/" + mqttClientID;
 bool mqttInitialized = false;
+MQTTClientCallbackSimple mqttCallback = NULL;
 
 // #======================== Prototypes ========================#
 
@@ -39,7 +40,8 @@ int Mqtt_setCallback(MQTTClientCallbackSimple cb);
 int Mqtt_setLoggerOutput(Stream *s);
 
 int mqtt_log_print(String message);
-int cb_mqttConnected();
+int mqtt_connectedCallback();
+void mqtt_messageReceivedCallback(String &topic, String &payload);
 
 // #======================== Initialization ========================#
 
@@ -56,6 +58,7 @@ int Mqtt_init()
     // TODO: Check if wifi is connected
 
     mqttClient.begin(MQTT_HOST, MQTT_PORT, *Wifi_getClient());
+    mqttClient.onMessage(mqtt_messageReceivedCallback);
 
     mqtt_log_print("[MQTT] Initialized\n");
     mqttInitialized = true;
@@ -87,7 +90,7 @@ bool Mqtt_isInitialized()
 
 int Mqtt_setCallback(MQTTClientCallbackSimple cb)
 {
-    mqttClient.onMessage(cb);
+    mqttCallback = cb;
     return 0;
 }
 
@@ -111,7 +114,7 @@ int Mqtt_connect_blocking()
     }
     mqtt_log_print("\n");
 
-    cb_mqttConnected();
+    mqtt_connectedCallback();
     return 0;
 }
 
@@ -164,15 +167,37 @@ int mqtt_log_print(String message)
 
 // #======================== Callbacks ========================#
 
-int cb_mqttConnected()
+int mqtt_connectedCallback()
 {
     mqtt_log_print("[MQTT] Connected!\n");
     mqttClient.publish((mqttRootTopic + "/$state").c_str(), "init", true, 2);
-    mqttClient.subscribe("hello");
+    mqttClient.subscribe((mqttRootTopic + "/test").c_str(), 2);
     // TODO: Add more subscriptions here
     mqttClient.publish((mqttRootTopic + "/$state").c_str(), "ready", true, 2);
     return 0;
 }
+
+void mqtt_messageReceivedCallback(String &topic, String &payload){
+
+    mqtt_log_print("[MQTT] Receive: " + topic + " - " + payload + "\n");
+    mqtt_log_print("[MQTT] Root: " + mqttRootTopic + "\n");
+
+    //validate and remove root topic here
+    if(topic.startsWith(mqttRootTopic)){
+        topic = topic.substring(mqttRootTopic.length() + 1);
+    }else {
+        return;
+    }
+
+    mqtt_log_print("[MQTT] SubTopic: " + topic + "\n");
+
+    // Call the callback
+    if (mqttCallback)
+    {
+        mqttCallback(topic, payload);
+    }
+}
+
 
 // #======================== Interrupt ========================#
 
