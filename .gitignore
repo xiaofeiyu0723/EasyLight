@@ -1,2 +1,8 @@
 .vscode/settings.json
 .config/
+**/.config/
+*.log
+*.err.log
+bemfa_gateway/devices.json
+bemfa_gateway_esp8266/bemfa_gateway_esp8266_config.h
+bemfa_gateway_esp8266/build/

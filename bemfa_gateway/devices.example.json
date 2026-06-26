@@ -1,0 +1,20 @@
+[
+  {
+    "topic": "el36f98d006",
+    "name": "Living Room Switch",
+    "room": "Living Room",
+    "group": "Lights"
+  },
+  {
+    "topic": "el36af6c006",
+    "name": "Bedroom Switch",
+    "room": "Bedroom",
+    "group": "Lights"
+  },
+  {
+    "topic": "el37078b006",
+    "name": "Study Switch",
+    "room": "Study",
+    "group": "Lights"
+  }
+]
