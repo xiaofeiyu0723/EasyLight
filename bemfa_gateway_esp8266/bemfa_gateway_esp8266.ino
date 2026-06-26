@@ -58,6 +58,12 @@ using namespace ace_crc::crc16ccitt_byte;
 #define PAIR_WINDOW_MS 60000UL
 #define WIFI_RECONNECT_MS 15000UL
 #define WIFI_CONNECT_TIMEOUT_MS 30000UL
+#define POWER_ACK_TIMEOUT_MS 2000UL
+#define POWER_ACK_RETRY_DELAY_MS 2000UL
+#define POWER_ACK_MAX_RETRIES 1
+#define RF_TX_GAP_MS 750UL
+#define RF_POWER_QUEUE_SIZE 12
+#define POWER_ACK_TRACKER_SIZE 8
 #define MAX_LIGHT_BINDINGS 24
 #ifndef SETUP_AP_PASSWORD
 #define SETUP_AP_PASSWORD "easylight"
@@ -80,6 +86,26 @@ struct LightBinding
   String label;
 };
 
+struct QueuedPowerCommand
+{
+  bool active;
+  String topic;
+  byte controllerId[3];
+  bool powerOn;
+  byte attempt;
+  unsigned long dueAt;
+};
+
+struct PendingPowerAck
+{
+  bool active;
+  String topic;
+  byte controllerId[3];
+  bool powerOn;
+  byte attempt;
+  unsigned long sentAt;
+};
+
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
@@ -91,6 +117,8 @@ const size_t staticLightBindingCount = sizeof(staticLightBindings) / sizeof(stat
 LightBinding lightBindings[MAX_LIGHT_BINDINGS];
 String runtimeControllerIds[MAX_LIGHT_BINDINGS];
 size_t lightBindingCount = 0;
+QueuedPowerCommand powerQueue[RF_POWER_QUEUE_SIZE];
+PendingPowerAck pendingPowerAcks[POWER_ACK_TRACKER_SIZE];
 
 uint8_t syncWord[] = {0x21, 0xA4};
 unsigned long lastMqttReconnectAttempt = 0;
@@ -98,11 +126,13 @@ unsigned long lastWifiReconnectAttempt = 0;
 unsigned long wifiConnectStartedAt = 0;
 unsigned long lastStatusPublishAt = 0;
 unsigned long pairingStartedAt = 0;
+unsigned long nextRfTxAt = 0;
 int pairingTopicIndex = -1;
 int lastWifiStatus = WL_IDLE_STATUS;
 bool radioReady = false;
 bool pairingActive = false;
 bool wifiWasConnected = false;
+bool mqttWasConnected = false;
 bool bemfaAutoSyncDone = false;
 String setupApName;
 String deviceHostName;
@@ -139,6 +169,14 @@ bool validateControllerResponse(byte *packet, size_t len);
 void logGatewayResponse(byte *packet, byte controllerId[3]);
 const char *gatewayCommandName(byte command);
 void saveCapturedController(byte controllerId[3]);
+void startPowerCommand(const String &topic, byte controllerId[3], bool powerOn);
+bool enqueuePowerCommand(const String &topic, byte controllerId[3], bool powerOn, byte attempt, unsigned long dueAt);
+void cancelPendingPowerAck(byte controllerId[3]);
+void trackPowerAck(const String &topic, byte controllerId[3], bool powerOn, byte attempt);
+void maintainPowerQueue();
+void maintainPowerAcks();
+void maintainPowerCommand();
+bool handlePowerAck(byte *packet, byte controllerId[3]);
 
 void beginWifi();
 void maintainWifi();
@@ -169,6 +207,7 @@ bool sendAddGatewayPacket(byte controllerId[3]);
 bool sendDeleteGatewayPacket(byte controllerId[3]);
 bool sendGatewayBindingPacket(byte controllerId[3], byte command, const char *label);
 bool transmitPacket(byte *packet, size_t len);
+bool controllerIdsMatch(byte left[3], byte right[3]);
 void placeCrc(byte *packet, const size_t *payloadIndexes, size_t payloadLen, size_t crcHighIndex, size_t crcLowIndex);
 void publishExpectedState(const String &topic, bool powerOn);
 void publishGatewayStatus(bool force = false);
@@ -219,6 +258,9 @@ void setup()
   }
 
   mqttClient.setServer(BEMFA_MQTT_HOST, BEMFA_MQTT_PORT);
+  mqttClient.setBufferSize(512);
+  mqttClient.setKeepAlive(60);
+  mqttClient.setSocketTimeout(15);
   mqttClient.setCallback(handleMqtt);
 }
 
@@ -231,6 +273,7 @@ void loop()
   maintainMqtt();
   publishGatewayStatus(false);
   handleRadio();
+  maintainPowerCommand();
 
   if (pairingActive && millis() - pairingStartedAt > PAIR_WINDOW_MS)
   {
@@ -580,6 +623,7 @@ void handleRadio()
   Serial.print("[RF] Controller response from ");
   Serial.println(controllerIdToHex(controllerId));
   logGatewayResponse(packet, controllerId);
+  handlePowerAck(packet, controllerId);
 
   if (pairingActive && pairingTopicIndex >= 0)
   {
@@ -791,6 +835,7 @@ void maintainWifi()
   if (wifiWasConnected)
   {
     wifiWasConnected = false;
+    mqttWasConnected = false;
     if (mqttClient.connected())
     {
       mqttClient.disconnect();
@@ -844,10 +889,12 @@ bool connectMqtt()
   {
     Serial.print("failed, state ");
     Serial.println(mqttClient.state());
+    mqttWasConnected = false;
     return false;
   }
 
   Serial.println("connected");
+  mqttWasConnected = true;
   subscribeTopics();
   publishGatewayStatus(true);
   return true;
@@ -884,6 +931,13 @@ void maintainMqtt()
 
   if (!mqttClient.connected())
   {
+    if (mqttWasConnected)
+    {
+      mqttWasConnected = false;
+      Serial.print("[MQTT] Disconnected, state ");
+      Serial.println(mqttClient.state());
+    }
+
     unsigned long now = millis();
     if (now - lastMqttReconnectAttempt > 5000)
     {
@@ -947,10 +1001,7 @@ void handleMqtt(char *rawTopic, byte *payload, unsigned int length)
     return;
   }
 
-  if (sendPowerPacket(controllerId, shouldTurnOn))
-  {
-    publishExpectedState(topic, shouldTurnOn);
-  }
+  startPowerCommand(topic, controllerId, shouldTurnOn);
 }
 
 void initBindingsFromConfig()
@@ -1456,6 +1507,17 @@ String controllerIdToHex(byte controllerId[3])
   return String(buffer);
 }
 
+void startPowerCommand(const String &topic, byte controllerId[3], bool powerOn)
+{
+  Serial.print("[RF] Power request ");
+  Serial.print(powerOn ? "ON" : "OFF");
+  Serial.print(" for ");
+  Serial.println(controllerIdToHex(controllerId));
+
+  cancelPendingPowerAck(controllerId);
+  enqueuePowerCommand(topic, controllerId, powerOn, 1, millis());
+}
+
 bool sendPowerPacket(byte controllerId[3], bool powerOn)
 {
   byte value = powerOn ? 0x01 : 0x00;
@@ -1479,6 +1541,92 @@ bool sendPowerPacket(byte controllerId[3], bool powerOn)
   Serial.println(controllerIdToHex(controllerId));
 
   return transmitPacket(packet, sizeof(packet));
+}
+
+bool enqueuePowerCommand(const String &topic, byte controllerId[3], bool powerOn, byte attempt, unsigned long dueAt)
+{
+  if (attempt == 1)
+  {
+    bool replacedQueuedCommand = false;
+    for (size_t i = 0; i < RF_POWER_QUEUE_SIZE; i++)
+    {
+      if (powerQueue[i].active && powerQueue[i].topic == topic)
+      {
+        powerQueue[i].active = false;
+        replacedQueuedCommand = true;
+      }
+    }
+    if (replacedQueuedCommand)
+    {
+      Serial.println("[RF] Replaced queued power command for same topic");
+    }
+  }
+
+  for (size_t i = 0; i < RF_POWER_QUEUE_SIZE; i++)
+  {
+    if (!powerQueue[i].active)
+    {
+      powerQueue[i].active = true;
+      powerQueue[i].topic = topic;
+      powerQueue[i].controllerId[0] = controllerId[0];
+      powerQueue[i].controllerId[1] = controllerId[1];
+      powerQueue[i].controllerId[2] = controllerId[2];
+      powerQueue[i].powerOn = powerOn;
+      powerQueue[i].attempt = attempt;
+      powerQueue[i].dueAt = dueAt;
+      Serial.print("[RF] Queued power command attempt ");
+      Serial.print(attempt);
+      Serial.print(" for ");
+      Serial.println(controllerIdToHex(controllerId));
+      return true;
+    }
+  }
+
+  Serial.println("[RF] Power queue full; command dropped");
+  radioStatusText = "queue full";
+  return false;
+}
+
+void cancelPendingPowerAck(byte controllerId[3])
+{
+  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
+  {
+    if (pendingPowerAcks[i].active && controllerIdsMatch(pendingPowerAcks[i].controllerId, controllerId))
+    {
+      pendingPowerAcks[i].active = false;
+      Serial.print("[RF] Cancelled pending POWER ACK for ");
+      Serial.println(controllerIdToHex(controllerId));
+    }
+  }
+}
+
+void trackPowerAck(const String &topic, byte controllerId[3], bool powerOn, byte attempt)
+{
+  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
+  {
+    if (pendingPowerAcks[i].active && controllerIdsMatch(pendingPowerAcks[i].controllerId, controllerId))
+    {
+      pendingPowerAcks[i].active = false;
+    }
+  }
+
+  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
+  {
+    if (!pendingPowerAcks[i].active)
+    {
+      pendingPowerAcks[i].active = true;
+      pendingPowerAcks[i].topic = topic;
+      pendingPowerAcks[i].controllerId[0] = controllerId[0];
+      pendingPowerAcks[i].controllerId[1] = controllerId[1];
+      pendingPowerAcks[i].controllerId[2] = controllerId[2];
+      pendingPowerAcks[i].powerOn = powerOn;
+      pendingPowerAcks[i].attempt = attempt;
+      pendingPowerAcks[i].sentAt = millis();
+      return;
+    }
+  }
+
+  Serial.println("[RF] POWER ACK tracker full");
 }
 
 bool sendAddGatewayPacket(byte controllerId[3])
@@ -1612,6 +1760,142 @@ bool transmitPacket(byte *packet, size_t len)
   Serial.println("[RF] Transmit OK");
   configureReceiveMode();
   return true;
+}
+
+void maintainPowerQueue()
+{
+  unsigned long now = millis();
+  if (now < nextRfTxAt)
+  {
+    return;
+  }
+
+  int selected = -1;
+  unsigned long selectedDueAt = 0;
+  for (size_t i = 0; i < RF_POWER_QUEUE_SIZE; i++)
+  {
+    if (!powerQueue[i].active || now < powerQueue[i].dueAt)
+    {
+      continue;
+    }
+
+    bool isHigherPriority = selected < 0 ||
+                            powerQueue[i].attempt < powerQueue[selected].attempt ||
+                            (powerQueue[i].attempt == powerQueue[selected].attempt && powerQueue[i].dueAt < selectedDueAt);
+    if (isHigherPriority)
+    {
+      selected = (int)i;
+      selectedDueAt = powerQueue[i].dueAt;
+    }
+  }
+
+  if (selected < 0)
+  {
+    return;
+  }
+
+  QueuedPowerCommand command = powerQueue[selected];
+  powerQueue[selected].active = false;
+
+  Serial.print("[RF] Power attempt ");
+  Serial.print(command.attempt);
+  Serial.print("/");
+  Serial.println(POWER_ACK_MAX_RETRIES + 1);
+
+  receivedFlag = false;
+  bool ok = sendPowerPacket(command.controllerId, command.powerOn);
+  nextRfTxAt = millis() + RF_TX_GAP_MS;
+
+  if (!ok)
+  {
+    radioStatusText = "tx failed";
+    if (command.attempt <= POWER_ACK_MAX_RETRIES)
+    {
+      Serial.println("[RF] TX failed; retry queued");
+      enqueuePowerCommand(command.topic, command.controllerId, command.powerOn, command.attempt + 1, millis() + POWER_ACK_RETRY_DELAY_MS);
+    }
+    return;
+  }
+
+  publishExpectedState(command.topic, command.powerOn);
+  trackPowerAck(command.topic, command.controllerId, command.powerOn, command.attempt);
+  radioStatusText = "sent waiting ack";
+}
+
+void maintainPowerAcks()
+{
+  unsigned long now = millis();
+  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
+  {
+    if (!pendingPowerAcks[i].active || now - pendingPowerAcks[i].sentAt <= POWER_ACK_TIMEOUT_MS)
+    {
+      continue;
+    }
+
+    PendingPowerAck ack = pendingPowerAcks[i];
+    pendingPowerAcks[i].active = false;
+
+    Serial.print("[RF] No POWER ACK received for ");
+    Serial.println(controllerIdToHex(ack.controllerId));
+    if (ack.attempt <= POWER_ACK_MAX_RETRIES)
+    {
+      Serial.println("[RF] Retry queued after missing POWER ACK");
+      enqueuePowerCommand(ack.topic, ack.controllerId, ack.powerOn, ack.attempt + 1, now + POWER_ACK_RETRY_DELAY_MS);
+      radioStatusText = "retry queued";
+    }
+    else
+    {
+      radioStatusText = "sent unacked";
+    }
+  }
+}
+
+void maintainPowerCommand()
+{
+  maintainPowerAcks();
+  maintainPowerQueue();
+}
+
+bool handlePowerAck(byte *packet, byte controllerId[3])
+{
+  if (packet[1] != 0x04 || packet[10] != 0x04)
+  {
+    return false;
+  }
+
+  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
+  {
+    if (!pendingPowerAcks[i].active || !controllerIdsMatch(pendingPowerAcks[i].controllerId, controllerId))
+    {
+      continue;
+    }
+
+    pendingPowerAcks[i].active = false;
+    if (packet[11] == 0x00)
+    {
+      Serial.println("[RF] POWER ACK OK");
+      radioStatusText = "power ack";
+      return true;
+    }
+    if (packet[11] == 0x02)
+    {
+      Serial.println("[RF] POWER ACK REJECT");
+      radioStatusText = "power reject";
+      return true;
+    }
+
+    Serial.print("[RF] POWER ACK unknown result ");
+    Serial.println(packet[11], HEX);
+    radioStatusText = "power ack unknown";
+    return true;
+  }
+
+  return false;
+}
+
+bool controllerIdsMatch(byte left[3], byte right[3])
+{
+  return left[0] == right[0] && left[1] == right[1] && left[2] == right[2];
 }
 
 void placeCrc(byte *packet, const size_t *payloadIndexes, size_t payloadLen, size_t crcHighIndex, size_t crcLowIndex)

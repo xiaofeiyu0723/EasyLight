@@ -91,6 +91,16 @@ Payload example:
 wifi:connected;mqtt:connected;radio:ready;ip:192.168.1.23;ap:192.168.4.1
 ```
 
+## Power Control
+
+For `on`/`off` commands, the MQTT callback only queues the RF work. The main loop sends queued RF packets with at least 750 ms between transmissions, then tracks each command's `POWER` ACK in the background:
+
+```text
+54 21 A4 23 03 10 3A 96 9D E7 <CRC> 9B 00 <controllerId[3]> 04 02 <01|00>
+```
+
+If no `POWER` ACK arrives within 2 seconds, the gateway queues one retry for 2 seconds later. Fresh user commands are always sent before retries. A new command for the same topic replaces any queued older command and cancels that receiver's previous pending ACK, so rapid toggles do not get pulled backward by stale retries. A `REJECT` ACK stops the retry. The EasyLight gateway `PING` command can read state on some receivers, but it is not used automatically because some receivers visibly blink when pinged.
+
 If CC1101 fails to initialize, `radio` will show an error code such as `error:-2`.
 
 ## Notes
