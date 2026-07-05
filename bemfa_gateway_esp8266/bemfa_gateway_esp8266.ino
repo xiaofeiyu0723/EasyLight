@@ -50,6 +50,7 @@ using namespace ace_crc::crc16ccitt_byte;
 #define RADIO_PREAMBLE_LENGTH 32
 #define PACKET_LENGTH 24
 #define PACKET_THIRD_SYNC_WORD 0x23
+#define SWITCH_PACKET_LENGTH 11
 
 // Web pairing portal
 #define DNS_PORT 53
@@ -58,12 +59,9 @@ using namespace ace_crc::crc16ccitt_byte;
 #define PAIR_WINDOW_MS 60000UL
 #define WIFI_RECONNECT_MS 15000UL
 #define WIFI_CONNECT_TIMEOUT_MS 30000UL
-#define POWER_ACK_TIMEOUT_MS 2000UL
-#define POWER_ACK_RETRY_DELAY_MS 2000UL
-#define POWER_ACK_MAX_RETRIES 1
-#define RF_TX_GAP_MS 750UL
-#define RF_POWER_QUEUE_SIZE 12
-#define POWER_ACK_TRACKER_SIZE 8
+#define RF_TX_MIN_GAP_MS 750UL
+#define RF_TX_MAX_ATTEMPTS 2
+#define RF_TX_RETRY_DELAY_MS 350UL
 #define MAX_LIGHT_BINDINGS 24
 #ifndef SETUP_AP_PASSWORD
 #define SETUP_AP_PASSWORD "easylight"
@@ -72,6 +70,10 @@ using namespace ace_crc::crc16ccitt_byte;
 #ifndef STATIC_LIGHT_BINDINGS
 #define STATIC_LIGHT_BINDINGS {"", "", ""}
 #endif
+
+#define PAIR_MODE_NONE 0
+#define PAIR_MODE_CONTROLLER 1
+#define PAIR_MODE_SWITCH 2
 
 struct StaticLightBinding
 {
@@ -86,26 +88,6 @@ struct LightBinding
   String label;
 };
 
-struct QueuedPowerCommand
-{
-  bool active;
-  String topic;
-  byte controllerId[3];
-  bool powerOn;
-  byte attempt;
-  unsigned long dueAt;
-};
-
-struct PendingPowerAck
-{
-  bool active;
-  String topic;
-  byte controllerId[3];
-  bool powerOn;
-  byte attempt;
-  unsigned long sentAt;
-};
-
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 CC1101 radio = new Module(PIN_CS, PIN_GDO0, PIN_RST, PIN_GDO2);
@@ -116,9 +98,11 @@ StaticLightBinding staticLightBindings[] = {STATIC_LIGHT_BINDINGS};
 const size_t staticLightBindingCount = sizeof(staticLightBindings) / sizeof(staticLightBindings[0]);
 LightBinding lightBindings[MAX_LIGHT_BINDINGS];
 String runtimeControllerIds[MAX_LIGHT_BINDINGS];
+String runtimeSwitchCodes[MAX_LIGHT_BINDINGS];
+bool runtimeSwitchAssist[MAX_LIGHT_BINDINGS];
+bool runtimePowerKnown[MAX_LIGHT_BINDINGS];
+bool runtimePowerStates[MAX_LIGHT_BINDINGS];
 size_t lightBindingCount = 0;
-QueuedPowerCommand powerQueue[RF_POWER_QUEUE_SIZE];
-PendingPowerAck pendingPowerAcks[POWER_ACK_TRACKER_SIZE];
 
 uint8_t syncWord[] = {0x21, 0xA4};
 unsigned long lastMqttReconnectAttempt = 0;
@@ -128,6 +112,7 @@ unsigned long lastStatusPublishAt = 0;
 unsigned long pairingStartedAt = 0;
 unsigned long nextRfTxAt = 0;
 int pairingTopicIndex = -1;
+byte pairingMode = PAIR_MODE_NONE;
 int lastWifiStatus = WL_IDLE_STATUS;
 bool radioReady = false;
 bool pairingActive = false;
@@ -156,27 +141,26 @@ void handleRoot();
 void handleWifiSave();
 void handleSyncDevices();
 void handlePair();
+void handlePairSwitch();
+void handleSwitchAssist();
 void handleUnpair();
 void handleClear();
 void handleNotFound();
 String renderPage();
 String htmlEscape(const String &value);
-void startPairing(int index);
+void startPairing(int index, byte mode);
 void stopPairing(const char *reason);
 void handleRadio();
 bool extractControllerId(byte *packet, size_t len, byte controllerId[3]);
+bool extractSwitchCode(byte *packet, size_t len, byte switchId[4], byte &buttonId);
 bool validateControllerResponse(byte *packet, size_t len);
+bool validateSwitchPacket(byte *packet, size_t len);
 void logGatewayResponse(byte *packet, byte controllerId[3]);
+void logSwitchPacket(byte switchId[4], byte buttonId);
 const char *gatewayCommandName(byte command);
 void saveCapturedController(byte controllerId[3]);
+void saveCapturedSwitch(byte switchId[4], byte buttonId);
 void startPowerCommand(const String &topic, byte controllerId[3], bool powerOn);
-bool enqueuePowerCommand(const String &topic, byte controllerId[3], bool powerOn, byte attempt, unsigned long dueAt);
-void cancelPendingPowerAck(byte controllerId[3]);
-void trackPowerAck(const String &topic, byte controllerId[3], bool powerOn, byte attempt);
-void maintainPowerQueue();
-void maintainPowerAcks();
-void maintainPowerCommand();
-bool handlePowerAck(byte *packet, byte controllerId[3]);
 
 void beginWifi();
 void maintainWifi();
@@ -200,14 +184,16 @@ int hexNibble(char c);
 int findBindingByTopic(const String &topic);
 bool parseControllerId(const String &hex, byte controllerId[3]);
 String controllerIdToHex(byte controllerId[3]);
+bool parseSwitchCode(const String &hex, byte switchId[4], byte &buttonId);
+String switchCodeToHex(byte switchId[4], byte buttonId);
 
 bool configureReceiveMode(bool updateStatus = true);
+bool sendSwitchTogglePacket(byte switchId[4], byte buttonId);
 bool sendPowerPacket(byte controllerId[3], bool powerOn);
 bool sendAddGatewayPacket(byte controllerId[3]);
 bool sendDeleteGatewayPacket(byte controllerId[3]);
 bool sendGatewayBindingPacket(byte controllerId[3], byte command, const char *label);
 bool transmitPacket(byte *packet, size_t len);
-bool controllerIdsMatch(byte left[3], byte right[3]);
 void placeCrc(byte *packet, const size_t *payloadIndexes, size_t payloadLen, size_t crcHighIndex, size_t crcLowIndex);
 void publishExpectedState(const String &topic, bool powerOn);
 void publishGatewayStatus(bool force = false);
@@ -273,7 +259,6 @@ void loop()
   maintainMqtt();
   publishGatewayStatus(false);
   handleRadio();
-  maintainPowerCommand();
 
   if (pairingActive && millis() - pairingStartedAt > PAIR_WINDOW_MS)
   {
@@ -302,6 +287,8 @@ void startSetupPortal()
   webServer.on("/wifi", HTTP_POST, handleWifiSave);
   webServer.on("/sync", handleSyncDevices);
   webServer.on("/pair", handlePair);
+  webServer.on("/pair-switch", handlePairSwitch);
+  webServer.on("/switch-assist", handleSwitchAssist);
   webServer.on("/unpair", handleUnpair);
   webServer.on("/clear", handleClear);
   webServer.onNotFound(handleNotFound);
@@ -366,7 +353,42 @@ void handlePair()
     return;
   }
 
-  startPairing(index);
+  startPairing(index, PAIR_MODE_CONTROLLER);
+  webServer.sendHeader("Location", "/", true);
+  webServer.send(302, "text/plain", "");
+}
+
+void handlePairSwitch()
+{
+  int index = webServer.arg("i").toInt();
+  if (index < 0 || (size_t)index >= lightBindingCount)
+  {
+    webServer.send(400, "text/plain", "Invalid topic index");
+    return;
+  }
+
+  startPairing(index, PAIR_MODE_SWITCH);
+  webServer.sendHeader("Location", "/", true);
+  webServer.send(302, "text/plain", "");
+}
+
+void handleSwitchAssist()
+{
+  int index = webServer.arg("i").toInt();
+  if (index < 0 || (size_t)index >= lightBindingCount)
+  {
+    webServer.send(400, "text/plain", "Invalid topic index");
+    return;
+  }
+
+  runtimeSwitchAssist[index] = webServer.arg("enabled") == "1";
+  saveMappings();
+
+  Serial.print("[Portal] Switch assist ");
+  Serial.print(runtimeSwitchAssist[index] ? "enabled" : "disabled");
+  Serial.print(" for ");
+  Serial.println(lightBindings[index].topic);
+
   webServer.sendHeader("Location", "/", true);
   webServer.send(302, "text/plain", "");
 }
@@ -400,6 +422,8 @@ void handleUnpair()
   }
 
   runtimeControllerIds[index] = "";
+  runtimeSwitchCodes[index] = "";
+  runtimeSwitchAssist[index] = false;
   saveMappings();
   if (pairingActive && pairingTopicIndex == index)
   {
@@ -421,7 +445,7 @@ void handleNotFound()
 String renderPage()
 {
   String html;
-  html.reserve(9000);
+  html.reserve(12000);
   html += F("<!doctype html><html><head><meta charset='utf-8'>");
   html += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
   if (pairingActive)
@@ -493,9 +517,12 @@ String renderPage()
     unsigned long remaining = (PAIR_WINDOW_MS - (millis() - pairingStartedAt)) / 1000;
     html += F("<div class='danger'>Pairing: ");
     html += htmlEscape(lightBindings[pairingTopicIndex].topic);
+    html += pairingMode == PAIR_MODE_SWITCH ? F(" switch") : F(" gateway");
     html += F(" (");
     html += String(remaining);
-    html += F("s left). Trigger the target controller now.</div>");
+    html += F("s left). ");
+    html += pairingMode == PAIR_MODE_SWITCH ? F("Press the physical switch now.") : F("Trigger the target controller now.");
+    html += F("</div>");
   }
   html += F("</div>");
 
@@ -537,13 +564,40 @@ String renderPage()
     html += F("<div style='margin:10px 0'>");
     html += F("<a class='btn' href='/pair?i=");
     html += String(i);
-    html += F("'>Pair</a>");
+    html += F("'>Pair Gateway</a>");
+    html += F("<a class='btn' href='/pair-switch?i=");
+    html += String(i);
+    html += F("'>Pair Switch</a>");
     html += F("<a class='btn clear' href='/unpair?i=");
     html += String(i);
     html += F("'>Unpair</a>");
     html += F("</div>");
     html += F("<div class='id'>Controller ID: ");
     html += runtimeControllerIds[i].length() ? htmlEscape(runtimeControllerIds[i]) : "(not paired)";
+    html += F("</div><div class='id'>Switch Code: ");
+    html += runtimeSwitchCodes[i].length() ? htmlEscape(runtimeSwitchCodes[i]) : "(not paired)";
+    html += F("</div><div class='id'>Switch Assist: ");
+    html += runtimeSwitchAssist[i] ? "enabled" : "disabled";
+    html += F("</div>");
+    if (runtimeSwitchCodes[i].length())
+    {
+      html += F("<div style='margin:10px 0'><a class='btn' href='/switch-assist?i=");
+      html += String(i);
+      html += F("&enabled=");
+      html += runtimeSwitchAssist[i] ? "0" : "1";
+      html += F("'>");
+      html += runtimeSwitchAssist[i] ? "Disable Switch Assist" : "Enable Switch Assist";
+      html += F("</a></div>");
+    }
+    html += F("<div class='id'>State: ");
+    if (runtimePowerKnown[i])
+    {
+      html += runtimePowerStates[i] ? "on" : "off";
+    }
+    else
+    {
+      html += F("unknown");
+    }
     html += F("</div><div class='small'>Topic: ");
     html += htmlEscape(topic);
     html += F("</div>");
@@ -566,14 +620,17 @@ String htmlEscape(const String &value)
   return escaped;
 }
 
-void startPairing(int index)
+void startPairing(int index, byte mode)
 {
   pairingTopicIndex = index;
+  pairingMode = mode;
   pairingStartedAt = millis();
   pairingActive = true;
 
   Serial.print("[Pairing] Started for ");
-  Serial.println(lightBindings[index].topic);
+  Serial.print(lightBindings[index].topic);
+  Serial.print(" mode ");
+  Serial.println(mode == PAIR_MODE_SWITCH ? "switch" : "gateway");
   if (radioReady)
   {
     configureReceiveMode();
@@ -590,6 +647,7 @@ void stopPairing(const char *reason)
   Serial.print("[Pairing] Stopped: ");
   Serial.println(reason);
   pairingActive = false;
+  pairingMode = PAIR_MODE_NONE;
   pairingTopicIndex = -1;
 }
 
@@ -613,6 +671,19 @@ void handleRadio()
     return;
   }
 
+  byte switchId[4];
+  byte buttonId = 0;
+  if (extractSwitchCode(packet, PACKET_LENGTH, switchId, buttonId))
+  {
+    logSwitchPacket(switchId, buttonId);
+    if (pairingActive && pairingTopicIndex >= 0 && pairingMode == PAIR_MODE_SWITCH)
+    {
+      saveCapturedSwitch(switchId, buttonId);
+    }
+    configureReceiveMode(false);
+    return;
+  }
+
   byte controllerId[3];
   if (!extractControllerId(packet, PACKET_LENGTH, controllerId))
   {
@@ -623,9 +694,8 @@ void handleRadio()
   Serial.print("[RF] Controller response from ");
   Serial.println(controllerIdToHex(controllerId));
   logGatewayResponse(packet, controllerId);
-  handlePowerAck(packet, controllerId);
 
-  if (pairingActive && pairingTopicIndex >= 0)
+  if (pairingActive && pairingTopicIndex >= 0 && pairingMode == PAIR_MODE_CONTROLLER)
   {
     saveCapturedController(controllerId);
   }
@@ -664,6 +734,32 @@ bool extractControllerId(byte *packet, size_t len, byte controllerId[3])
   return true;
 }
 
+bool extractSwitchCode(byte *packet, size_t len, byte switchId[4], byte &buttonId)
+{
+  if (len < 8 || packet[0] != PACKET_THIRD_SYNC_WORD)
+  {
+    return false;
+  }
+
+  buttonId = packet[5];
+  bool knownPress = buttonId == 0x00 || buttonId == 0x01 || buttonId == 0x02 || buttonId == 0x04;
+  if (!knownPress)
+  {
+    return false;
+  }
+
+  if (!validateSwitchPacket(packet, len))
+  {
+    return false;
+  }
+
+  switchId[0] = packet[1];
+  switchId[1] = packet[2];
+  switchId[2] = packet[3];
+  switchId[3] = packet[4];
+  return true;
+}
+
 bool validateControllerResponse(byte *packet, size_t len)
 {
   if (len < 13)
@@ -698,6 +794,21 @@ bool validateControllerResponse(byte *packet, size_t len)
   return (uint16_t)crc == messageCrc;
 }
 
+bool validateSwitchPacket(byte *packet, size_t len)
+{
+  if (len < 8)
+  {
+    return false;
+  }
+
+  crc_t crc = crc_init();
+  crc = crc_update(crc, &packet[1], 5);
+  crc = crc_finalize(crc);
+
+  uint16_t messageCrc = ((uint16_t)packet[6] << 8) | packet[7];
+  return (uint16_t)crc == messageCrc;
+}
+
 void logGatewayResponse(byte *packet, byte controllerId[3])
 {
   if (packet[1] != 0x04 || packet[2] < 0x0B)
@@ -728,6 +839,14 @@ void logGatewayResponse(byte *packet, byte controllerId[3])
   radioStatusText += gatewayCommandName(command);
   radioStatusText += " ";
   radioStatusText += resultText;
+}
+
+void logSwitchPacket(byte switchId[4], byte buttonId)
+{
+  Serial.print("[RF] Switch packet ");
+  Serial.println(switchCodeToHex(switchId, buttonId));
+  radioStatusText = "switch ";
+  radioStatusText += switchCodeToHex(switchId, buttonId);
 }
 
 const char *gatewayCommandName(byte command)
@@ -764,6 +883,20 @@ void saveCapturedController(byte controllerId[3])
 
   sendAddGatewayPacket(controllerId);
   stopPairing("captured");
+}
+
+void saveCapturedSwitch(byte switchId[4], byte buttonId)
+{
+  String code = switchCodeToHex(switchId, buttonId);
+  runtimeSwitchCodes[pairingTopicIndex] = code;
+  saveMappings();
+
+  Serial.print("[Pairing] Bound switch ");
+  Serial.print(lightBindings[pairingTopicIndex].topic);
+  Serial.print(" -> ");
+  Serial.println(code);
+
+  stopPairing("switch captured");
 }
 
 void beginWifi()
@@ -972,7 +1105,15 @@ void handleMqtt(char *rawTopic, byte *payload, unsigned int length)
   Serial.print(" -> ");
   Serial.println(message);
 
-  int index = findBindingByTopic(topic);
+  String commandTopic = topic;
+  bool isStateUpdate = false;
+  if (commandTopic.endsWith("/up"))
+  {
+    commandTopic = commandTopic.substring(0, commandTopic.length() - 3);
+    isStateUpdate = true;
+  }
+
+  int index = findBindingByTopic(commandTopic);
   if (index < 0)
   {
     Serial.println("[MQTT] Topic is not configured");
@@ -994,6 +1135,17 @@ void handleMqtt(char *rawTopic, byte *payload, unsigned int length)
     return;
   }
 
+  if (isStateUpdate)
+  {
+    runtimePowerKnown[index] = true;
+    runtimePowerStates[index] = shouldTurnOn;
+    Serial.print("[MQTT] State noted for ");
+    Serial.print(commandTopic);
+    Serial.print(": ");
+    Serial.println(shouldTurnOn ? "on" : "off");
+    return;
+  }
+
   byte controllerId[3];
   if (!parseControllerId(runtimeControllerIds[index], controllerId))
   {
@@ -1001,7 +1153,7 @@ void handleMqtt(char *rawTopic, byte *payload, unsigned int length)
     return;
   }
 
-  startPowerCommand(topic, controllerId, shouldTurnOn);
+  startPowerCommand(commandTopic, controllerId, shouldTurnOn);
 }
 
 void initBindingsFromConfig()
@@ -1144,6 +1296,10 @@ bool syncBemfaDevices()
     lightBindings[lightBindingCount].topic = topic;
     lightBindings[lightBindingCount].label = label;
     runtimeControllerIds[lightBindingCount] = "";
+    runtimeSwitchCodes[lightBindingCount] = "";
+    runtimeSwitchAssist[lightBindingCount] = false;
+    runtimePowerKnown[lightBindingCount] = false;
+    runtimePowerStates[lightBindingCount] = false;
     seen[lightBindingCount] = true;
     lightBindingCount++;
     synced++;
@@ -1163,6 +1319,10 @@ bool syncBemfaDevices()
     {
       lightBindings[writeIndex] = lightBindings[readIndex];
       runtimeControllerIds[writeIndex] = runtimeControllerIds[readIndex];
+      runtimeSwitchCodes[writeIndex] = runtimeSwitchCodes[readIndex];
+      runtimeSwitchAssist[writeIndex] = runtimeSwitchAssist[readIndex];
+      runtimePowerKnown[writeIndex] = runtimePowerKnown[readIndex];
+      runtimePowerStates[writeIndex] = runtimePowerStates[readIndex];
     }
     writeIndex++;
   }
@@ -1172,6 +1332,10 @@ bool syncBemfaDevices()
     lightBindings[i].topic = "";
     lightBindings[i].label = "";
     runtimeControllerIds[i] = "";
+    runtimeSwitchCodes[i] = "";
+    runtimeSwitchAssist[i] = false;
+    runtimePowerKnown[i] = false;
+    runtimePowerStates[i] = false;
   }
   lightBindingCount = writeIndex;
 
@@ -1216,6 +1380,10 @@ void addOrUpdateBinding(const String &topic, const String &label)
   lightBindings[lightBindingCount].topic = cleanTopic;
   lightBindings[lightBindingCount].label = cleanLabel.length() ? cleanLabel : cleanTopic;
   runtimeControllerIds[lightBindingCount] = "";
+  runtimeSwitchCodes[lightBindingCount] = "";
+  runtimeSwitchAssist[lightBindingCount] = false;
+  runtimePowerKnown[lightBindingCount] = false;
+  runtimePowerStates[lightBindingCount] = false;
   lightBindingCount++;
 }
 
@@ -1324,6 +1492,51 @@ void loadMappings()
           }
         }
       }
+      else if (topic == "SW")
+      {
+        int comma = id.indexOf(',');
+        if (comma > 0)
+        {
+          String mappedTopic = hexDecode(id.substring(0, comma));
+          String mappedCode = id.substring(comma + 1);
+          int index = findBindingByTopic(mappedTopic);
+          if (index < 0 && mappedTopic.length() > 0)
+          {
+            addOrUpdateBinding(mappedTopic, mappedTopic);
+            index = findBindingByTopic(mappedTopic);
+          }
+
+          byte switchId[4];
+          byte buttonId = 0;
+          if (index >= 0 && mappedCode == "-")
+          {
+            runtimeSwitchCodes[index] = "";
+          }
+          else if (index >= 0 && parseSwitchCode(mappedCode, switchId, buttonId))
+          {
+            runtimeSwitchCodes[index] = switchCodeToHex(switchId, buttonId);
+          }
+        }
+      }
+      else if (topic == "SA")
+      {
+        int comma = id.indexOf(',');
+        if (comma > 0)
+        {
+          String mappedTopic = hexDecode(id.substring(0, comma));
+          String enabled = id.substring(comma + 1);
+          int index = findBindingByTopic(mappedTopic);
+          if (index < 0 && mappedTopic.length() > 0)
+          {
+            addOrUpdateBinding(mappedTopic, mappedTopic);
+            index = findBindingByTopic(mappedTopic);
+          }
+          if (index >= 0)
+          {
+            runtimeSwitchAssist[index] = enabled == "1";
+          }
+        }
+      }
       else
       {
         // Legacy format: topic=controllerId.
@@ -1388,6 +1601,38 @@ void saveMappings()
     data += hexEncode(topic);
     data += ",";
     data += (id.length() == 6) ? id : "-";
+    data += ";";
+  }
+
+  for (size_t i = 0; i < lightBindingCount; i++)
+  {
+    String topic = lightBindings[i].topic;
+    String code = runtimeSwitchCodes[i];
+    topic.trim();
+    code.trim();
+    if (topic.length() == 0)
+    {
+      continue;
+    }
+    data += "SW=";
+    data += hexEncode(topic);
+    data += ",";
+    data += (code.length() == 10) ? code : "-";
+    data += ";";
+  }
+
+  for (size_t i = 0; i < lightBindingCount; i++)
+  {
+    String topic = lightBindings[i].topic;
+    topic.trim();
+    if (topic.length() == 0)
+    {
+      continue;
+    }
+    data += "SA=";
+    data += hexEncode(topic);
+    data += ",";
+    data += runtimeSwitchAssist[i] ? "1" : "0";
     data += ";";
   }
 
@@ -1507,6 +1752,51 @@ String controllerIdToHex(byte controllerId[3])
   return String(buffer);
 }
 
+bool parseSwitchCode(const String &hex, byte switchId[4], byte &buttonId)
+{
+  String code = hex;
+  code.trim();
+  code.toUpperCase();
+
+  if (code.length() != 10)
+  {
+    return false;
+  }
+
+  byte parsed[5];
+  for (int i = 0; i < 5; i++)
+  {
+    char part[3] = {code[i * 2], code[i * 2 + 1], '\0'};
+    char *endPtr = nullptr;
+    long value = strtol(part, &endPtr, 16);
+    if (*endPtr != '\0' || value < 0 || value > 0xFF)
+    {
+      return false;
+    }
+    parsed[i] = (byte)value;
+  }
+
+  bool knownPress = parsed[4] == 0x00 || parsed[4] == 0x01 || parsed[4] == 0x02 || parsed[4] == 0x04;
+  if (!knownPress)
+  {
+    return false;
+  }
+
+  switchId[0] = parsed[0];
+  switchId[1] = parsed[1];
+  switchId[2] = parsed[2];
+  switchId[3] = parsed[3];
+  buttonId = parsed[4];
+  return true;
+}
+
+String switchCodeToHex(byte switchId[4], byte buttonId)
+{
+  char buffer[11];
+  snprintf(buffer, sizeof(buffer), "%02X%02X%02X%02X%02X", switchId[0], switchId[1], switchId[2], switchId[3], buttonId);
+  return String(buffer);
+}
+
 void startPowerCommand(const String &topic, byte controllerId[3], bool powerOn)
 {
   Serial.print("[RF] Power request ");
@@ -1514,8 +1804,51 @@ void startPowerCommand(const String &topic, byte controllerId[3], bool powerOn)
   Serial.print(" for ");
   Serial.println(controllerIdToHex(controllerId));
 
-  cancelPendingPowerAck(controllerId);
-  enqueuePowerCommand(topic, controllerId, powerOn, 1, millis());
+  int index = findBindingByTopic(topic);
+  byte switchId[4];
+  byte buttonId = 0;
+  if (index >= 0 && runtimeSwitchAssist[index] && parseSwitchCode(runtimeSwitchCodes[index], switchId, buttonId))
+  {
+    if (runtimePowerKnown[index] && runtimePowerStates[index] != powerOn)
+    {
+      sendSwitchTogglePacket(switchId, buttonId);
+    }
+    else if (runtimePowerKnown[index])
+    {
+      Serial.println("[RF] Skip SWITCH toggle; state already matches target");
+    }
+    else
+    {
+      Serial.println("[RF] Skip SWITCH toggle; current state unknown");
+    }
+  }
+  else if (index >= 0 && runtimeSwitchCodes[index].length())
+  {
+    Serial.println("[RF] Skip SWITCH toggle; switch assist disabled");
+  }
+
+  if (sendPowerPacket(controllerId, powerOn))
+  {
+    publishExpectedState(topic, powerOn);
+  }
+}
+
+bool sendSwitchTogglePacket(byte switchId[4], byte buttonId)
+{
+  byte packet[] = {
+      0x54,
+      0x21, 0xA4, 0x23,
+      switchId[0], switchId[1], switchId[2], switchId[3],
+      buttonId,
+      0x00, 0x00};
+
+  const size_t payloadIndexes[] = {4, 5, 6, 7, 8};
+  placeCrc(packet, payloadIndexes, sizeof(payloadIndexes) / sizeof(payloadIndexes[0]), 9, 10);
+
+  Serial.print("[RF] Sending SWITCH toggle ");
+  Serial.println(switchCodeToHex(switchId, buttonId));
+
+  return transmitPacket(packet, sizeof(packet));
 }
 
 bool sendPowerPacket(byte controllerId[3], bool powerOn)
@@ -1541,92 +1874,6 @@ bool sendPowerPacket(byte controllerId[3], bool powerOn)
   Serial.println(controllerIdToHex(controllerId));
 
   return transmitPacket(packet, sizeof(packet));
-}
-
-bool enqueuePowerCommand(const String &topic, byte controllerId[3], bool powerOn, byte attempt, unsigned long dueAt)
-{
-  if (attempt == 1)
-  {
-    bool replacedQueuedCommand = false;
-    for (size_t i = 0; i < RF_POWER_QUEUE_SIZE; i++)
-    {
-      if (powerQueue[i].active && powerQueue[i].topic == topic)
-      {
-        powerQueue[i].active = false;
-        replacedQueuedCommand = true;
-      }
-    }
-    if (replacedQueuedCommand)
-    {
-      Serial.println("[RF] Replaced queued power command for same topic");
-    }
-  }
-
-  for (size_t i = 0; i < RF_POWER_QUEUE_SIZE; i++)
-  {
-    if (!powerQueue[i].active)
-    {
-      powerQueue[i].active = true;
-      powerQueue[i].topic = topic;
-      powerQueue[i].controllerId[0] = controllerId[0];
-      powerQueue[i].controllerId[1] = controllerId[1];
-      powerQueue[i].controllerId[2] = controllerId[2];
-      powerQueue[i].powerOn = powerOn;
-      powerQueue[i].attempt = attempt;
-      powerQueue[i].dueAt = dueAt;
-      Serial.print("[RF] Queued power command attempt ");
-      Serial.print(attempt);
-      Serial.print(" for ");
-      Serial.println(controllerIdToHex(controllerId));
-      return true;
-    }
-  }
-
-  Serial.println("[RF] Power queue full; command dropped");
-  radioStatusText = "queue full";
-  return false;
-}
-
-void cancelPendingPowerAck(byte controllerId[3])
-{
-  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
-  {
-    if (pendingPowerAcks[i].active && controllerIdsMatch(pendingPowerAcks[i].controllerId, controllerId))
-    {
-      pendingPowerAcks[i].active = false;
-      Serial.print("[RF] Cancelled pending POWER ACK for ");
-      Serial.println(controllerIdToHex(controllerId));
-    }
-  }
-}
-
-void trackPowerAck(const String &topic, byte controllerId[3], bool powerOn, byte attempt)
-{
-  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
-  {
-    if (pendingPowerAcks[i].active && controllerIdsMatch(pendingPowerAcks[i].controllerId, controllerId))
-    {
-      pendingPowerAcks[i].active = false;
-    }
-  }
-
-  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
-  {
-    if (!pendingPowerAcks[i].active)
-    {
-      pendingPowerAcks[i].active = true;
-      pendingPowerAcks[i].topic = topic;
-      pendingPowerAcks[i].controllerId[0] = controllerId[0];
-      pendingPowerAcks[i].controllerId[1] = controllerId[1];
-      pendingPowerAcks[i].controllerId[2] = controllerId[2];
-      pendingPowerAcks[i].powerOn = powerOn;
-      pendingPowerAcks[i].attempt = attempt;
-      pendingPowerAcks[i].sentAt = millis();
-      return;
-    }
-  }
-
-  Serial.println("[RF] POWER ACK tracker full");
 }
 
 bool sendAddGatewayPacket(byte controllerId[3])
@@ -1713,28 +1960,6 @@ bool transmitPacket(byte *packet, size_t len)
     return false;
   }
 
-  int state = radio.variablePacketLengthMode();
-  if (state != RADIOLIB_ERR_NONE)
-  {
-    radioStatusText = "tx length error:" + String(state);
-    Serial.print("[RF] Variable packet mode failed, code ");
-    Serial.println(state);
-    configureReceiveMode();
-    return false;
-  }
-
-  // Match the original transmit-only example. The EasyLight protocol sync
-  // bytes are embedded in the payload as 54 21 A4 23.
-  state = radio.setSyncWord(0x12, 0xAD);
-  if (state != RADIOLIB_ERR_NONE)
-  {
-    radioStatusText = "tx sync error:" + String(state);
-    Serial.print("[RF] TX sync setup failed, code ");
-    Serial.println(state);
-    configureReceiveMode();
-    return false;
-  }
-
   Serial.print("[RF] Packet: ");
   for (size_t i = 0; i < len; i++)
   {
@@ -1747,155 +1972,67 @@ bool transmitPacket(byte *packet, size_t len)
   }
   Serial.println();
 
-  state = radio.transmit(packet, len);
-  if (state != RADIOLIB_ERR_NONE)
+  for (byte attempt = 1; attempt <= RF_TX_MAX_ATTEMPTS; attempt++)
   {
+    while ((long)(millis() - nextRfTxAt) < 0)
+    {
+      delay(10);
+      yield();
+    }
+
+    if (RF_TX_MAX_ATTEMPTS > 1)
+    {
+      Serial.print("[RF] TX attempt ");
+      Serial.print(attempt);
+      Serial.print("/");
+      Serial.println(RF_TX_MAX_ATTEMPTS);
+    }
+
+    int state = radio.variablePacketLengthMode();
+    if (state != RADIOLIB_ERR_NONE)
+    {
+      radioStatusText = "tx length error:" + String(state);
+      Serial.print("[RF] Variable packet mode failed, code ");
+      Serial.println(state);
+      configureReceiveMode();
+      nextRfTxAt = millis() + RF_TX_RETRY_DELAY_MS;
+      continue;
+    }
+
+    // Match the original transmit-only example. The EasyLight protocol sync
+    // bytes are embedded in the payload as 54 21 A4 23.
+    state = radio.setSyncWord(0x12, 0xAD);
+    if (state != RADIOLIB_ERR_NONE)
+    {
+      radioStatusText = "tx sync error:" + String(state);
+      Serial.print("[RF] TX sync setup failed, code ");
+      Serial.println(state);
+      configureReceiveMode();
+      nextRfTxAt = millis() + RF_TX_RETRY_DELAY_MS;
+      continue;
+    }
+
+    state = radio.transmit(packet, len);
+    nextRfTxAt = millis() + RF_TX_MIN_GAP_MS;
+    if (state == RADIOLIB_ERR_NONE)
+    {
+      Serial.println("[RF] Transmit OK");
+      configureReceiveMode();
+      return true;
+    }
+
     radioStatusText = "tx error:" + String(state);
     Serial.print("[RF] Transmit failed, code ");
     Serial.println(state);
     configureReceiveMode();
-    return false;
-  }
-
-  Serial.println("[RF] Transmit OK");
-  configureReceiveMode();
-  return true;
-}
-
-void maintainPowerQueue()
-{
-  unsigned long now = millis();
-  if (now < nextRfTxAt)
-  {
-    return;
-  }
-
-  int selected = -1;
-  unsigned long selectedDueAt = 0;
-  for (size_t i = 0; i < RF_POWER_QUEUE_SIZE; i++)
-  {
-    if (!powerQueue[i].active || now < powerQueue[i].dueAt)
+    if (attempt < RF_TX_MAX_ATTEMPTS)
     {
-      continue;
+      Serial.println("[RF] CC1101 TX retry scheduled");
+      nextRfTxAt = millis() + RF_TX_RETRY_DELAY_MS;
     }
-
-    bool isHigherPriority = selected < 0 ||
-                            powerQueue[i].attempt < powerQueue[selected].attempt ||
-                            (powerQueue[i].attempt == powerQueue[selected].attempt && powerQueue[i].dueAt < selectedDueAt);
-    if (isHigherPriority)
-    {
-      selected = (int)i;
-      selectedDueAt = powerQueue[i].dueAt;
-    }
-  }
-
-  if (selected < 0)
-  {
-    return;
-  }
-
-  QueuedPowerCommand command = powerQueue[selected];
-  powerQueue[selected].active = false;
-
-  Serial.print("[RF] Power attempt ");
-  Serial.print(command.attempt);
-  Serial.print("/");
-  Serial.println(POWER_ACK_MAX_RETRIES + 1);
-
-  receivedFlag = false;
-  bool ok = sendPowerPacket(command.controllerId, command.powerOn);
-  nextRfTxAt = millis() + RF_TX_GAP_MS;
-
-  if (!ok)
-  {
-    radioStatusText = "tx failed";
-    if (command.attempt <= POWER_ACK_MAX_RETRIES)
-    {
-      Serial.println("[RF] TX failed; retry queued");
-      enqueuePowerCommand(command.topic, command.controllerId, command.powerOn, command.attempt + 1, millis() + POWER_ACK_RETRY_DELAY_MS);
-    }
-    return;
-  }
-
-  publishExpectedState(command.topic, command.powerOn);
-  trackPowerAck(command.topic, command.controllerId, command.powerOn, command.attempt);
-  radioStatusText = "sent waiting ack";
-}
-
-void maintainPowerAcks()
-{
-  unsigned long now = millis();
-  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
-  {
-    if (!pendingPowerAcks[i].active || now - pendingPowerAcks[i].sentAt <= POWER_ACK_TIMEOUT_MS)
-    {
-      continue;
-    }
-
-    PendingPowerAck ack = pendingPowerAcks[i];
-    pendingPowerAcks[i].active = false;
-
-    Serial.print("[RF] No POWER ACK received for ");
-    Serial.println(controllerIdToHex(ack.controllerId));
-    if (ack.attempt <= POWER_ACK_MAX_RETRIES)
-    {
-      Serial.println("[RF] Retry queued after missing POWER ACK");
-      enqueuePowerCommand(ack.topic, ack.controllerId, ack.powerOn, ack.attempt + 1, now + POWER_ACK_RETRY_DELAY_MS);
-      radioStatusText = "retry queued";
-    }
-    else
-    {
-      radioStatusText = "sent unacked";
-    }
-  }
-}
-
-void maintainPowerCommand()
-{
-  maintainPowerAcks();
-  maintainPowerQueue();
-}
-
-bool handlePowerAck(byte *packet, byte controllerId[3])
-{
-  if (packet[1] != 0x04 || packet[10] != 0x04)
-  {
-    return false;
-  }
-
-  for (size_t i = 0; i < POWER_ACK_TRACKER_SIZE; i++)
-  {
-    if (!pendingPowerAcks[i].active || !controllerIdsMatch(pendingPowerAcks[i].controllerId, controllerId))
-    {
-      continue;
-    }
-
-    pendingPowerAcks[i].active = false;
-    if (packet[11] == 0x00)
-    {
-      Serial.println("[RF] POWER ACK OK");
-      radioStatusText = "power ack";
-      return true;
-    }
-    if (packet[11] == 0x02)
-    {
-      Serial.println("[RF] POWER ACK REJECT");
-      radioStatusText = "power reject";
-      return true;
-    }
-
-    Serial.print("[RF] POWER ACK unknown result ");
-    Serial.println(packet[11], HEX);
-    radioStatusText = "power ack unknown";
-    return true;
   }
 
   return false;
-}
-
-bool controllerIdsMatch(byte left[3], byte right[3])
-{
-  return left[0] == right[0] && left[1] == right[1] && left[2] == right[2];
 }
 
 void placeCrc(byte *packet, const size_t *payloadIndexes, size_t payloadLen, size_t crcHighIndex, size_t crcLowIndex)
@@ -1916,6 +2053,13 @@ void placeCrc(byte *packet, const size_t *payloadIndexes, size_t payloadLen, siz
 
 void publishExpectedState(const String &topic, bool powerOn)
 {
+  int index = findBindingByTopic(topic);
+  if (index >= 0)
+  {
+    runtimePowerKnown[index] = true;
+    runtimePowerStates[index] = powerOn;
+  }
+
   String stateTopic = topic + "/up";
   const char *state = powerOn ? "on" : "off";
 
@@ -1991,6 +2135,10 @@ void printTopicMappings()
       Serial.print(")");
     }
     Serial.print(" -> ");
-    Serial.println(runtimeControllerIds[i].length() ? runtimeControllerIds[i] : "(not paired)");
+    Serial.print(runtimeControllerIds[i].length() ? runtimeControllerIds[i] : "(not paired)");
+    Serial.print(" switch ");
+    Serial.print(runtimeSwitchCodes[i].length() ? runtimeSwitchCodes[i] : "(not paired)");
+    Serial.print(" assist ");
+    Serial.println(runtimeSwitchAssist[i] ? "enabled" : "disabled");
   }
 }
